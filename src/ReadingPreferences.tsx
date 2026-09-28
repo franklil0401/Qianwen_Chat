@@ -141,7 +141,14 @@ export default function ReadingPreferences() {
     useReadingPreferences();
   const details = useRef<HTMLDetailsElement>(null);
   const summary = useRef<HTMLElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const groupId = useId();
+
+  function fitPanel() {
+    if (!details.current?.open || !panel.current) return;
+    const anchor = details.current.getBoundingClientRect();
+    panel.current.style.maxHeight = `${Math.max(100, anchor.top - 20)}px`;
+  }
 
   useEffect(() => {
     const closeOutside = (event: PointerEvent) => {
@@ -164,9 +171,11 @@ export default function ReadingPreferences() {
     };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeWithEscape, true);
+    window.addEventListener("resize", fitPanel);
     return () => {
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeWithEscape, true);
+      window.removeEventListener("resize", fitPanel);
     };
   }, []);
 
@@ -175,6 +184,7 @@ export default function ReadingPreferences() {
       ref={details}
       className="reading-settings"
       data-testid="reading-settings"
+      onToggle={fitPanel}
       onBlur={(event) => {
         if (
           event.relatedTarget instanceof Node &&
@@ -193,7 +203,11 @@ export default function ReadingPreferences() {
         <span>阅读设置</span>
         <ChevronDown size={15} aria-hidden="true" />
       </summary>
-      <div className="reading-settings-panel" aria-label="阅读偏好设置">
+      <div
+        ref={panel}
+        className="reading-settings-panel"
+        aria-label="阅读偏好设置"
+      >
         <div className="reading-settings-heading">按你的习惯阅读</div>
         <fieldset>
           <legend>外观</legend>

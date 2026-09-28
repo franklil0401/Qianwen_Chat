@@ -56,6 +56,7 @@ import {
 import ToolCard, { copyText } from "./ToolCard";
 import { prepareHistory } from "./history";
 import ReadingPreferences from "./ReadingPreferences";
+import BackupControls from "./BackupControls";
 import { createBranch, findBranchPoint, type BranchMode } from "./branches";
 import {
   BranchBanner,
@@ -1023,6 +1024,33 @@ export default function App() {
           )}
         </nav>
         <div className="sidebar-bottom">
+          <BackupControls
+            getState={() => stateRef.current}
+            disabled={!!activeRunId}
+            onToast={setToast}
+            onImport={(next) => {
+              if (activeRun.current)
+                throw new Error("请等待当前生成结束后再导入备份。");
+              try {
+                localStorage.setItem(
+                  STORAGE_KEY,
+                  JSON.stringify(createSnapshot(next)),
+                );
+              } catch {
+                throw new Error(
+                  "浏览器空间不足，未导入任何会话。请清理浏览器存储后重试。",
+                );
+              }
+              if (persistTimer.current) clearTimeout(persistTimer.current);
+              update(() => next);
+              setEditing(null);
+              setHistorySearch("");
+              setMenuId(null);
+              setStorageError(false);
+              followScroll.current = true;
+              setShowLatest(false);
+            }}
+          />
           <ReadingPreferences />
           <div className="local-note">
             <span className="local-dot" />

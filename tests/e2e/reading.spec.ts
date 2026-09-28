@@ -25,6 +25,20 @@ test('appearance follows system changes and explicit preferences survive refresh
   await expect(page.getByTestId('message-input')).toHaveCSS('font-size', '18px');
 });
 
+test('reading settings stay reachable in short desktop windows and after resize', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 700 });
+  await page.goto('/');
+  await page.getByLabel('阅读设置与快捷键').click();
+  for (const height of [700, 600, 520]) {
+    await page.setViewportSize({ width: 1024, height });
+    await expect.poll(async () => (await page.locator('.reading-settings-panel').boundingBox())?.y ?? -1).toBeGreaterThanOrEqual(8);
+    await page.getByRole('radio', { name: '大号字号' }).check();
+    await expect(page.getByRole('radio', { name: '大号字号' })).toBeChecked();
+  }
+  await page.keyboard.press('Escape');
+  await expect(page.getByLabel('阅读设置与快捷键')).toBeFocused();
+});
+
 test('both themes keep tool summaries, reasoning and errors readable at desktop sizes', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 900 });
   await page.addInitScript(() => {
