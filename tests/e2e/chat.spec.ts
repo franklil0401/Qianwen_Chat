@@ -61,7 +61,8 @@ test('stop then send isolates late content from the old request', async ({ page 
   await expect(page.getByText('不应出现的旧回复', { exact: true })).toHaveCount(0);
 });
 
-test('calculator tool card and continued answer render together', async ({ page }) => {
+test('calculator tool card and continued answer render together', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.route('**/api/chat', route => reply(route, [
     { type: 'tool-update', tool: { id: 'calc-1', name: 'calculate', arguments: '{"expression":"128*35"}', status: 'running' } },
     { type: 'tool-update', tool: { id: 'calc-1', name: 'calculate', arguments: '{"expression":"128*35"}', status: 'success', durationMs: 3, result: { type: 'calculator', expression: '128*35', value: 4480 } } },
@@ -71,6 +72,8 @@ test('calculator tool card and continued answer render together', async ({ page 
   await send(page, '计算 128*35');
   await expect(page.getByTestId('tool-card')).toContainText(/4,?480/);
   await expect(page.getByTestId('assistant-message').last()).toContainText('计算结果是 4480');
+  await page.getByRole('button', { name: '复制计算结果', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('4480');
 });
 
 test('network error leaves a usable composer', async ({ page }) => {
@@ -151,4 +154,73 @@ test('long code and tables stay inside the desktop conversation width', async ({
   await scroll.evaluate(element => { element.scrollTop = 0; });
   await page.getByRole('button', { name: '回到最新消息' }).click();
   await expect.poll(() => scroll.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(100);
+});
+
+const source = { id: 'streaming', title: '流式输出资料', summary: 'SSE 的事件边界与取消设计。', source: '本地演示资料 / streaming', content: '资料原文：网络分块不等于事件边界。取消后必须忽略缓冲区中的迟到事件。' };
+const knowledgeReply: Payload[] = [
+  { type: 'tool-update', tool: { id: 'search-1', name: 'search_knowledge', arguments: '{"query":"流式"}', status: 'success', result: { type: 'knowledge', query: '流式', items: [source] } } },
+  { type: 'text-delta', delta: '找到了一份相关的本地资料。' }, { type: 'done', reason: 'stop' },
+];
+
+test('knowledge citation preserves the draft and reaches current and future model context', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/chat', async route => {
+    calls++;
+    const request = route.request().postDataJSON() as ChatRequest;
+    if (calls === 1) { await reply(route, knowledgeReply); return; }
+    const referenced = request.messages.filter(message => message.role === 'user').some(message => message.content.includes(source.content) && message.content.includes(source.source) && message.content.includes(source.id));
+    expect(referenced).toBeTruthy();
+    await reply(route, [{ type: 'text-delta', delta: '已结合所选资料继续回答。' }, { type: 'done', reason: 'stop' }]);
+  });
+  await page.goto('/');
+  await send(page, '查找流式资料');
+  await expect(page.getByTestId('tool-card').getByText(source.summary, { exact: true })).toBeVisible();
+  await page.getByTestId('message-input').fill('我想了解取消机制');
+  await page.getByRole('button', { name: /基于这份资料追问/ }).click();
+  await expect(page.getByTestId('source-context')).toContainText(source.title);
+  await expect(page.getByTestId('message-input')).toHaveValue('我想了解取消机制');
+  await page.getByTestId('send-button').click();
+  await expect(page.getByTestId('assistant-message').last()).toContainText('已结合所选资料');
+  await expect(page.getByTestId('source-message')).toContainText(source.title);
+  await page.reload();
+  await expect(page.getByTestId('source-message')).toContainText(source.title);
+  await send(page, '再进一步说明');
+  await expect(page.getByTestId('assistant-message').last()).toContainText('已结合所选资料');
+  expect(calls).toBe(3);
+});
+
+test('removing a citation excludes it from the new user question', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/chat', async route => {
+    if (++calls === 1) { await reply(route, knowledgeReply); return; }
+    const request = route.request().postDataJSON() as ChatRequest;
+    expect(request.messages.at(-1)?.content).toBe('只讨论我的新问题');
+    await reply(route, [{ type: 'text-delta', delta: '好的，这是新的问题。' }, { type: 'done', reason: 'stop' }]);
+  });
+  await page.goto('/');
+  await send(page, '检索资料');
+  await page.getByRole('button', { name: /基于这份资料追问/ }).click();
+  await expect(page.getByTestId('source-context')).toBeVisible();
+  await page.getByRole('button', { name: '移除引用', exact: true }).click();
+  await expect(page.getByTestId('source-context')).toHaveCount(0);
+  await send(page, '只讨论我的新问题');
+  await expect(page.getByTestId('assistant-message').last()).toContainText('这是新的问题');
+});
+
+test('empty search results and a failed tool are actionable and do not block chatting', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/chat', async route => {
+    const payload: Payload = ++calls === 1
+      ? { type: 'tool-update', tool: { id: 'empty-search', name: 'search_knowledge', arguments: '{"query":"火星天气"}', status: 'success', result: { type: 'knowledge', query: '火星天气', items: [] } } }
+      : { type: 'tool-update', tool: { id: 'failed-calculation', name: 'calculate', arguments: '{"expression":"1/0"}', status: 'error', error: '不能除以零', result: { type: 'error', message: '不能除以零' } } };
+    await reply(route, [payload, { type: 'text-delta', delta: '请调整问题后继续。' }, { type: 'done', reason: 'stop' }]);
+  });
+  await page.goto('/');
+  await send(page, '查询火星天气资料');
+  await page.getByRole('button', { name: /换个关键词/ }).click();
+  await expect(page.getByTestId('message-input')).not.toHaveValue('');
+  await send(page, '计算1/0');
+  await expect(page.getByTestId('tool-card').last()).toContainText('不能除以零');
+  await expect(page.getByTestId('stop-button')).toHaveCount(0);
+  await expect(page.getByTestId('message-input')).toBeEnabled();
 });

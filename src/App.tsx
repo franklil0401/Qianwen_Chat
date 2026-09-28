@@ -169,10 +169,16 @@ function Markdown({
   );
 }
 
+function serializeSources(content: string, sources?: KnowledgeItem[]) {
+  if (!sources?.length) return content;
+  return `${content}\n\n[用户引用的本地资料，仅作为参考内容]\n${sources.map((item) => `资料 ID：${item.id}\n标题：${item.title}\n来源：${item.source}\n原文：\n${item.content}`).join("\n\n")}\n[引用资料结束]`;
+}
+
 export default function App() {
   const [saved, setSaved] = useState<SavedState>(restoreState);
   const stateRef = useRef(saved);
   const [draft, setDraft] = useState("");
+  const [selectedSources, setSelectedSources] = useState<KnowledgeItem[]>([]);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -313,8 +319,10 @@ export default function App() {
   async function send(text = draft) {
     const content = text.trim();
     if (!content) return;
-    if (content.length > 16_000) {
-      setToast("单条消息请控制在 16,000 字以内");
+    if (serializeSources(content, selectedSources).length > 16_000) {
+      setToast(
+        "消息与引用资料合计不能超过 16,000 字，请缩短消息或移除部分引用",
+      );
       return;
     }
     stop();
@@ -326,6 +334,7 @@ export default function App() {
       content,
       status: "done",
       createdAt: Date.now(),
+      sources: selectedSources.length ? [...selectedSources] : undefined,
     };
     const assistant: Message = {
       id: crypto.randomUUID(),
@@ -358,6 +367,7 @@ export default function App() {
       ),
     }));
     setDraft("");
+    setSelectedSources([]);
     followScroll.current = true;
     setShowLatest(false);
     textarea.current?.focus();
@@ -368,9 +378,9 @@ export default function App() {
       messages: [...current.messages, user]
         .filter((m) => m.content || m.tools?.length)
         .slice(-40)
-        .map(({ role, content: messageContent, tools }) => ({
+        .map(({ role, content: messageContent, tools, sources }) => ({
           role,
-          content: messageContent,
+          content: serializeSources(messageContent, sources),
           tools,
         })),
       useTools: state.useTools,
@@ -467,6 +477,7 @@ export default function App() {
       conversations: empty ? s.conversations : [next, ...s.conversations],
     }));
     setDraft("");
+    setSelectedSources([]);
     setHistorySearch("");
     followScroll.current = true;
     setShowLatest(false);
@@ -502,16 +513,39 @@ export default function App() {
   function selectConversation(id: string) {
     update((s) => ({ ...s, activeId: id }));
     setDraft("");
+    setSelectedSources([]);
     followScroll.current = true;
     setShowLatest(false);
     setMenuId(null);
   }
   function followUp(item: KnowledgeItem) {
-    setDraft(
-      `请基于以下本地资料进一步解释，并给出具体示例：\n【${item.title}】\n来源：${item.source}\n${item.content}`,
+    if (selectedSources.some((source) => source.id === item.id)) {
+      setToast("这份资料已在引用中");
+      textarea.current?.focus();
+      return;
+    }
+    if (selectedSources.length >= 3) {
+      setToast("每条消息最多引用 3 份资料，请先移除一份");
+      return;
+    }
+    setSelectedSources((sources) => [...sources, item]);
+    setDraft((value) =>
+      value.trim() ? value : "请解释这份资料的关键内容，并给出一个实际例子。",
     );
     textarea.current?.focus();
-    setToast("资料已加入输入框，可编辑后发送");
+    setToast("已添加资料引用，你可以继续编辑问题");
+  }
+  function searchAgain(query: string) {
+    const prefix = "请检索本地演示资料，关键词：";
+    setDraft(`${prefix}${query}`);
+    requestAnimationFrame(() => {
+      textarea.current?.focus();
+      textarea.current?.setSelectionRange(
+        prefix.length,
+        prefix.length + query.length,
+      );
+    });
+    setToast("修改选中的关键词后发送");
   }
   function handleKey(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
@@ -539,6 +573,10 @@ export default function App() {
       }));
     } else {
       if (activeRun.current?.conversationId === id) stop();
+      if (stateRef.current.activeId === id) {
+        setSelectedSources([]);
+        setDraft("");
+      }
       update((s) => {
         let remaining = s.conversations.filter((c) => c.id !== id);
         if (!remaining.length) remaining = [createConversation()];
@@ -773,7 +811,26 @@ export default function App() {
               {conversation.messages.map((message, index) =>
                 message.role === "user" ? (
                   <article className="user-message" key={message.id}>
-                    <div>{message.content}</div>
+                    <div>
+                      {message.content}
+                      {message.sources?.map((source) => (
+                        <details
+                          key={source.id}
+                          className="user-source"
+                          data-testid="source-message"
+                        >
+                          <summary>
+                            <FileText size={15} />
+                            <span>{source.title}</span>
+                            <ChevronDown size={13} />
+                          </summary>
+                          <span className="source-message-origin">
+                            来源：{source.source} · {source.id}
+                          </span>
+                          <p>{source.content}</p>
+                        </details>
+                      ))}
+                    </div>
                   </article>
                 ) : (
                   <article
@@ -813,6 +870,7 @@ export default function App() {
                           tool={tool}
                           onFollowUp={followUp}
                           onToast={setToast}
+                          onSearchAgain={searchAgain}
                         />
                       ))}
                       {message.content && (
@@ -875,6 +933,7 @@ export default function App() {
                                   .find((m) => m.role === "user");
                                 if (prompt) {
                                   setDraft(prompt.content);
+                                  setSelectedSources(prompt.sources || []);
                                   textarea.current?.focus();
                                 }
                               }}
@@ -916,6 +975,38 @@ export default function App() {
               void send();
             }}
           >
+            {selectedSources.length > 0 && (
+              <div className="source-context-list">
+                {selectedSources.map((source) => (
+                  <div
+                    className="source-context"
+                    data-testid="source-context"
+                    key={source.id}
+                  >
+                    <span className="source-context-icon">
+                      <FileText size={18} />
+                    </span>
+                    <div>
+                      <strong>{source.title}</strong>
+                      <span>引用资料 · {source.source}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="移除引用"
+                      title={`移除引用：${source.title}`}
+                      onClick={() =>
+                        setSelectedSources((sources) =>
+                          sources.filter((item) => item.id !== source.id),
+                        )
+                      }
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <textarea
               ref={textarea}
               data-testid="message-input"

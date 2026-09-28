@@ -1,4 +1,4 @@
-import type { HistoryMessage, ToolCall } from "../shared/types";
+import type { HistoryMessage, KnowledgeItem, ToolCall } from "../shared/types";
 
 export type MessageStatus = "streaming" | "done" | "stopped" | "error";
 export interface Message extends HistoryMessage {
@@ -7,6 +7,7 @@ export interface Message extends HistoryMessage {
   status: MessageStatus;
   error?: string;
   createdAt: number;
+  sources?: KnowledgeItem[];
 }
 export interface Conversation {
   id: string;

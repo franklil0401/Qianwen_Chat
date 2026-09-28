@@ -971,7 +971,7 @@ h1 {
   color: #8e849f;
   overflow: auto;
 }
-.tool-error {
+.tool-error-message {
   font-size: 12px;
   color: #bd7887;
   padding: 0 15px;
@@ -990,6 +990,162 @@ h1 {
   margin-bottom: 8px;
   padding: 11px 12px;
   color: #8c7e9f;
+}
+.knowledge-item h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 550;
+  color: #6c627a;
+  margin: 0;
+}
+.knowledge-item h4 svg {
+  flex-shrink: 0;
+}
+.knowledge-actions {
+  position: relative;
+  padding-top: 12px;
+}
+.knowledge-original summary {
+  width: max-content;
+  padding: 4px 0;
+  color: #8d7c9e;
+}
+.knowledge-original[open] summary svg {
+  transform: rotate(180deg);
+}
+.knowledge-actions .follow-up {
+  position: absolute;
+  right: 0;
+  top: 12px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.knowledge-original .knowledge-content {
+  border-top: 1px solid #ede7f3;
+  padding-top: 12px;
+  max-height: 280px;
+  overflow: auto;
+}
+.empty-tool-result {
+  padding: 14px 8px 11px;
+  color: #a193b0;
+}
+.empty-tool-result p {
+  color: #7c6b8e;
+  font-size: 13px;
+  margin: 10px 0 6px;
+}
+.empty-tool-result > span {
+  font-size: 12px;
+}
+.empty-tool-result button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 15px;
+  border: 1px solid #e2d9ef;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: #83709a;
+}
+.empty-tool-result button:hover {
+  background: #f5f1fa;
+}
+.tool-progress {
+  margin: 14px 15px 3px;
+  font-size: 12px;
+  color: #9a8daa;
+  line-height: 1.7;
+}
+.source-context-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 13px;
+}
+.source-context {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid #e5ddf3;
+  border-radius: 10px;
+  padding: 9px 8px 9px 10px;
+  background: #faf8fe;
+}
+.source-context-icon {
+  display: flex;
+  color: #ad96c5;
+  flex-shrink: 0;
+}
+.source-context > div {
+  min-width: 0;
+  max-width: 390px;
+}
+.source-context strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 550;
+  color: #77618d;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.source-context > div > span {
+  display: block;
+  color: #a18dae;
+  font-size: 12px;
+  margin-top: 3px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.source-context .icon-button {
+  width: 25px;
+  height: 25px;
+}
+.user-source {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #dbe0f0;
+  border-radius: 9px;
+  background: #f4f6fe;
+  white-space: normal;
+}
+.user-source summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #7e819d;
+  cursor: pointer;
+  list-style: none;
+}
+.user-source summary > svg {
+  flex-shrink: 0;
+}
+.user-source summary > svg:last-child {
+  margin-left: auto;
+}
+.source-message-origin {
+  display: block;
+  font-size: 12px;
+  color: #8f91ab;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+.user-source p {
+  white-space: pre-wrap;
+  max-height: 230px;
+  overflow: auto;
+  font-size: 12px;
+  color: #8588a1;
+  line-height: 1.8;
+  margin: 8px 0 0;
 }
 .knowledge-item summary {
   display: flex;

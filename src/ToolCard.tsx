@@ -17,6 +17,7 @@ type ResultProps = {
   result: ToolResult;
   onFollowUp: (item: KnowledgeItem) => void;
   onToast: (text: string) => void;
+  onSearchAgain: (query: string) => void;
 };
 export async function copyText(value: string, onToast: (text: string) => void) {
   try {
@@ -32,9 +33,7 @@ function CalculatorResult({ result, onToast }: ResultProps) {
     <div className="calculation">
       <span>{result.expression}</span>
       <div>
-        <strong>
-          {result.value.toLocaleString("zh-CN", { maximumFractionDigits: 12 })}
-        </strong>
+        <strong>{String(result.value)}</strong>
         <button
           className="icon-button"
           aria-label="复制计算结果"
@@ -47,7 +46,7 @@ function CalculatorResult({ result, onToast }: ResultProps) {
     </div>
   );
 }
-function KnowledgeResult({ result, onFollowUp }: ResultProps) {
+function KnowledgeResult({ result, onFollowUp, onSearchAgain }: ResultProps) {
   if (result.type !== "knowledge") return null;
   return (
     <div className="knowledge-results">
@@ -55,22 +54,36 @@ function KnowledgeResult({ result, onFollowUp }: ResultProps) {
         本地演示资料 · {result.items.length} 条结果
       </div>
       {result.items.length === 0 && (
-        <p className="muted">没有找到匹配资料，可以换个关键词继续提问。</p>
+        <div className="empty-tool-result">
+          <Search size={20} />
+          <p>没有找到与“{result.query}”匹配的资料</p>
+          <span>试试「流式输出」「工具调用」或「打断」。</span>
+          <button onClick={() => onSearchAgain(result.query)}>
+            换个关键词 <span>↗</span>
+          </button>
+        </div>
       )}
       {result.items.map((item) => (
-        <details className="knowledge-item" key={item.id}>
-          <summary>
+        <article className="knowledge-item" key={item.id}>
+          <h4>
             <FileText size={16} />
             <span>{item.title}</span>
-            <ChevronDown size={14} />
-          </summary>
+          </h4>
           <p className="knowledge-summary">{item.summary}</p>
-          <p className="knowledge-content">{item.content}</p>
           <div className="knowledge-source">来源：{item.source}</div>
-          <button className="follow-up" onClick={() => onFollowUp(item)}>
-            基于这份资料追问 <span>↗</span>
-          </button>
-        </details>
+          <div className="knowledge-actions">
+            <details className="knowledge-original">
+              <summary>
+                查看原文
+                <ChevronDown size={13} />
+              </summary>
+              <p className="knowledge-content">{item.content}</p>
+            </details>
+            <button className="follow-up" onClick={() => onFollowUp(item)}>
+              基于这份资料追问 <span>↗</span>
+            </button>
+          </div>
+        </article>
       ))}
     </div>
   );
@@ -91,10 +104,12 @@ export default function ToolCard({
   tool,
   onFollowUp,
   onToast,
+  onSearchAgain,
 }: {
   tool: ToolCall;
   onFollowUp: (item: KnowledgeItem) => void;
   onToast: (text: string) => void;
+  onSearchAgain: (query: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const pending = ["receiving", "queued", "running"].includes(tool.status);
@@ -147,13 +162,26 @@ export default function ToolCard({
           result={tool.result}
           onFollowUp={onFollowUp}
           onToast={onToast}
+          onSearchAgain={onSearchAgain}
         />
       )}
       {(tool.error || tool.result?.type === "error") && (
-        <p className="tool-error">
+        <p className="tool-error-message">
           {tool.error ||
             (tool.result?.type === "error" ? tool.result.message : "")}
         </p>
+      )}
+      {pending && (
+        <p className="tool-progress">
+          {tool.status === "receiving"
+            ? "正在整理工具所需参数…"
+            : tool.status === "queued"
+              ? "准备就绪，等待执行…"
+              : "正在处理，请稍候…"}
+        </p>
+      )}
+      {tool.status === "cancelled" && (
+        <p className="tool-progress">本次调用已停止，可以继续提问。</p>
       )}
       <button
         className="tool-details-toggle"
