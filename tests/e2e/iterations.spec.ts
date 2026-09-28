@@ -49,7 +49,7 @@ test('editing can be cancelled without losing draft and submits a separate conve
   expect(requests).toHaveLength(1);
   await page.getByTestId('edit-message').click();
   await page.getByTestId('message-input').fill('修改后的问题');
-  await page.screenshot({ path: 'docs/screenshots/round4-edit.png', fullPage: true });
+  if (process.env.UPDATE_SCREENSHOTS === '1') await page.screenshot({ path: 'docs/screenshots/round4-edit.png', fullPage: true });
   await page.getByTestId('send-button').click();
   await expect(page.getByTestId('assistant-message').last()).toContainText('编辑回复2');
   expect(requests[1].messages.map(m => m.content)).toEqual(['修改后的问题']);
@@ -87,7 +87,7 @@ test('drafts and citations survive conversation switches and immediate refresh',
   await page.reload();
   await expect(page.getByTestId('message-input')).toHaveValue('甲也修改后尚未发送');
   await expect(page.getByTestId('source-context')).toContainText(source.title);
-  await page.screenshot({ path: 'docs/screenshots/round5-drafts.png', fullPage: true });
+  if (process.env.UPDATE_SCREENSHOTS === '1') await page.screenshot({ path: 'docs/screenshots/round5-drafts.png', fullPage: true });
   await page.getByTestId('send-button').click();
   await expect(page.getByTestId('assistant-message')).toContainText('发送成功');
   expect(requests[0].messages.at(-1)?.content).toContain(source.content);

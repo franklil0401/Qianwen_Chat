@@ -55,6 +55,7 @@ import {
 } from "./state";
 import ToolCard, { copyText } from "./ToolCard";
 import { prepareHistory } from "./history";
+import ReadingPreferences from "./ReadingPreferences";
 import { createBranch, findBranchPoint, type BranchMode } from "./branches";
 import {
   BranchBanner,
@@ -1022,6 +1023,7 @@ export default function App() {
           )}
         </nav>
         <div className="sidebar-bottom">
+          <ReadingPreferences />
           <div className="local-note">
             <span className="local-dot" />
             会话仅保存在本机
