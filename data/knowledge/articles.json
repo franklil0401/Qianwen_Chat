@@ -1,0 +1,44 @@
+[
+  {
+    "id": "streaming",
+    "title": "流式输出：从模型增量到聊天界面",
+    "summary": "用 fetch 与 SSE 逐块读取模型回复，并正确处理 UTF-8 和事件边界。",
+    "content": "本地演示资料。浏览器用 fetch POST 提交对话，本地 Node 服务调用千问兼容接口并启用 stream。模型输出增量经后端转换为 text-delta、reasoning-delta 和 tool-update 事件。SSE 的网络分块不等于事件边界，需要 TextDecoder 的流式解码和跨块缓冲。每个事件携带 runId、conversationId、messageId，避免旧任务写入新回复。界面收到真实增量后追加文本，不用定时器模拟流式输出。",
+    "source": "本地演示资料 · 实现说明 / streaming"
+  },
+  {
+    "id": "cancellation",
+    "title": "停止生成与新消息打断",
+    "summary": "AbortController 将取消沿浏览器、本地服务、模型请求和工具执行传播。",
+    "content": "本地演示资料。点击停止时，前端立即冻结当前回复，并中断读取和网络请求。后端同时提供显式取消接口，并监听响应连接关闭。每个任务持有 AbortController；取消后不启动新工具或下一轮模型调用。已输出内容保留并标记为已停止，已完成工具结果不声称被撤销。生成中发送新消息，先取消旧任务，再创建新的 runId。取消是协作式的，已到达远端的请求可能已经产生用量。",
+    "source": "本地演示资料 · 实现说明 / cancellation"
+  },
+  {
+    "id": "tool-calling",
+    "title": "Function Calling 与工具卡片",
+    "summary": "模型选择工具，后端校验并执行，结构化结果既回传模型也渲染成卡片。",
+    "content": "本地演示资料。工具调用完整链路为用户提问、模型产生 tool_calls、后端按索引组装名称与参数、校验 schema、执行工具、发送 role=tool 的结果、模型继续回答。界面用同一个工具 ID 跟踪接收参数、等待、运行、成功、失败或取消状态。本项目提供受限表达式计算器 calculate 和本地资料检索 search_knowledge。检索只覆盖随项目提供的示例文档，不等同于联网搜索。工具结果回传必须与 assistant 中的 tool_calls 配对，不能发送孤立工具消息。",
+    "source": "本地演示资料 · 实现说明 / tool-calling"
+  },
+  {
+    "id": "architecture",
+    "title": "本地网页架构与后续桌面迁移",
+    "summary": "React 页面、Node 本地代理和千问 API 分层，网页验收后再进入桌面阶段。",
+    "content": "本地演示资料。前端采用 React、TypeScript 和 Vite，负责会话、Markdown、工具卡片与交互。后端采用 Node.js、TypeScript 和 Express，只监听 127.0.0.1，读取系统环境变量 Qianwen_api_key 并代理千问 API。开发通过 Vite 代理 /api，生产由本地服务提供构建后的静态文件。会话保存在浏览器 localStorage，首版没有账户和云端同步。网页经用户确认后再封装为 PC 桌面应用，不预先安装 Electron 或生成安装包。",
+    "source": "本地演示资料 · 实现说明 / architecture"
+  },
+  {
+    "id": "interview-demo",
+    "title": "面试演示：五分钟操作路径",
+    "summary": "依次演示真实流式对话、打断、多轮上下文、计算工具和资料追问。",
+    "content": "本地演示资料。演示可从一句自然语言问题开始，观察千问回复逐步出现。接着要求一段较长内容，在输出中点击停止，再立刻发送新问题，验证旧回复不再追加。输入“请用计算工具计算 (128*36+259)/7”，观察工具参数、执行状态和结果。输入“检索本地资料中关于停止生成的设计”，展开资料原文并选择来源追问。最后刷新页面，确认会话恢复且中断任务不会自动重放。解释时强调真实模型工具协议、取消传播和上下文完整性。",
+    "source": "本地演示资料 · 面试准备 / interview-demo"
+  },
+  {
+    "id": "context-safety",
+    "title": "上下文、密钥与数据保存边界",
+    "summary": "控制上下文体积，保留工具组完整性；API Key 仅在后端使用。",
+    "content": "本地演示资料。显示用聊天记录与提交模型的消息分别建模。被取消、接收参数中或缺少结果的工具调用不进入后续工具协议；完整调用与结果始终成组裁剪。模型上下文只保留最近的有限历史，过长历史不会无限累积。Qianwen_api_key 不进入前端代码、接口响应、日志或 localStorage。浏览器存储的是本机聊天内容，清除站点数据后会丢失，首版不提供跨设备同步。数学工具不使用 eval，也不执行模型生成的任意代码。",
+    "source": "本地演示资料 · 实现说明 / context-safety"
+  }
+]
