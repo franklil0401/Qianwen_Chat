@@ -654,8 +654,110 @@ h1 {
 .user-message {
   display: flex;
   justify-content: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
   margin: 0 0 31px;
   padding-left: 60px;
+}
+.edit-message-button,
+.regenerate-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #8d829d;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.edit-message-button {
+  margin-top: 7px;
+}
+.edit-message-button:hover:not(:disabled),
+.regenerate-button:hover:not(:disabled) {
+  background: #f0ecf7;
+  color: #766288;
+}
+.edit-message-button:disabled,
+.regenerate-button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.editing-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 9px;
+  padding: 11px 13px;
+  background: #f7f4fe;
+  border: 1px solid #e7dff7;
+  border-radius: 12px;
+  color: #9b80ba;
+}
+.editing-banner > svg {
+  flex-shrink: 0;
+}
+.editing-banner > div {
+  min-width: 0;
+}
+.editing-banner strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 550;
+  color: #806696;
+}
+.editing-banner > div > span {
+  display: block;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #9a85ae;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 3px;
+}
+.editing-banner button {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #90759f;
+  padding: 5px 0 5px 8px;
+}
+.branch-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #9b88b1;
+  background: #faf8fd;
+  border: 1px solid #ece6f3;
+  border-radius: 10px;
+  padding: 10px 13px;
+  margin-bottom: 23px;
+  font-size: 12px;
+}
+.branch-banner > svg {
+  flex-shrink: 0;
+}
+.branch-banner > span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.branch-banner button {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: #8f6ca8;
+  font-size: 12px;
+  padding: 3px;
+}
+.branch-banner small {
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #b0a1bc;
 }
 .user-message > div {
   max-width: 86%;

@@ -20,6 +20,12 @@ export interface Conversation {
   title: string;
   messages: Message[];
   updatedAt: number;
+  branchFrom?: {
+    conversationId: string;
+    messageId: string;
+    title: string;
+    mode: "edit" | "regenerate";
+  };
 }
 export interface SavedState {
   version: 1;
@@ -78,6 +84,13 @@ const safeTime = (value: unknown) =>
     : Date.now();
 const validId = (value: unknown): value is string =>
   typeof value === "string" && /^[\w-]{1,100}$/.test(value);
+
+const branchSchema = z.object({
+  conversationId: z.string().regex(/^[\w-]{1,100}$/),
+  messageId: z.string().regex(/^[\w-]{1,100}$/),
+  title: z.string().max(100),
+  mode: z.enum(["edit", "regenerate"]),
+});
 
 /** Apply the same limits when saving and restoring, prioritizing the active conversation. */
 export function createSnapshot(state: SavedState): SavedState {
@@ -265,11 +278,14 @@ export function restoreState(): SavedState {
           createdAt: safeTime(original.createdAt),
         });
       }
+      const branch = branchSchema.safeParse(candidate.branchFrom);
+      if (candidate.branchFrom !== undefined && !branch.success) repaired = true;
       conversations.push({
         id: candidate.id,
         title: candidate.title.slice(0, 100) || "未命名对话",
         messages,
         updatedAt: safeTime(candidate.updatedAt),
+        branchFrom: branch.success ? branch.data : undefined,
       });
     }
     if (!conversations.length)

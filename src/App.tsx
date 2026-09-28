@@ -55,12 +55,32 @@ import {
 } from "./state";
 import ToolCard, { copyText } from "./ToolCard";
 import { prepareHistory } from "./history";
+import { createBranch, findBranchPoint, type BranchMode } from "./branches";
+import {
+  BranchBanner,
+  EditingBanner,
+  EditMessageButton,
+  RegenerateButton,
+} from "./BranchControls";
 
 interface ActiveRun {
   id: string;
   conversationId: string;
   messageId: string;
   controller: AbortController;
+}
+interface BranchRequest {
+  conversationId: string;
+  messageId: string;
+  mode: BranchMode;
+  sources: KnowledgeItem[];
+}
+interface EditingSession {
+  conversationId: string;
+  messageId: string;
+  title: string;
+  previousDraft: string;
+  previousSources: KnowledgeItem[];
 }
 type Modal =
   | { type: "rename" | "delete"; conversation: Conversation }
@@ -182,6 +202,7 @@ export default function App() {
   const stateRef = useRef(saved);
   const [draft, setDraft] = useState("");
   const [selectedSources, setSelectedSources] = useState<KnowledgeItem[]>([]);
+  const [editing, setEditing] = useState<EditingSession | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState(false);
   const [healthChecking, setHealthChecking] = useState(true);
@@ -428,24 +449,59 @@ export default function App() {
       textarea.current?.focus();
   }, [updateMessage]);
 
-  async function send(text = draft) {
+  async function send(text = draft, branchRequest?: BranchRequest) {
     const content = text.trim();
     if (!content) return;
-    if (serializeSources(content, selectedSources).length > 16_000) {
+    const sourceItems = branchRequest?.sources ?? selectedSources;
+    const branchIntent =
+      branchRequest ||
+      (editing
+        ? { ...editing, mode: "edit" as const, sources: sourceItems }
+        : undefined);
+    if (branchIntent && activeRun.current) {
+      setToast("请先停止当前生成，再编辑或重新生成回答。");
+      return;
+    }
+    if (serializeSources(content, sourceItems).length > 16_000) {
       setToast(
         "消息与引用资料合计不能超过 16,000 字，请缩短消息或移除部分引用",
       );
       return;
     }
     const state = stateRef.current;
-    const current = state.conversations.find((c) => c.id === state.activeId)!;
+    const original = state.conversations.find(
+      (c) => c.id === (branchIntent?.conversationId || state.activeId),
+    );
+    if (!original) {
+      setToast("原对话已不存在，请重新选择要发送的会话。");
+      return;
+    }
+    let current: Conversation;
+    try {
+      current = branchIntent
+        ? createBranch(
+            original,
+            branchIntent.messageId,
+            branchIntent.mode,
+            crypto.randomUUID(),
+            Date.now(),
+          )
+        : original;
+    } catch (error) {
+      setToast(
+        error instanceof Error
+          ? error.message
+          : "无法创建分支，请重新选择消息。",
+      );
+      return;
+    }
     const user: Message = {
       id: crypto.randomUUID(),
       role: "user",
       content,
       status: "done",
       createdAt: Date.now(),
-      sources: selectedSources.length ? [...selectedSources] : undefined,
+      sources: sourceItems.length ? structuredClone(sourceItems) : undefined,
     };
     let messages: ChatRequest["messages"];
     try {
@@ -488,21 +544,36 @@ export default function App() {
     };
     activeRun.current = run;
     setActiveRunId(run.id);
-    update((s) => ({
-      ...s,
-      conversations: s.conversations.map((c) =>
-        c.id === current.id
-          ? {
-              ...c,
-              title: c.messages.length ? c.title : content.slice(0, 22),
-              updatedAt: Date.now(),
-              messages: [...c.messages, user, assistant],
-            }
-          : c,
-      ),
-    }));
-    setDraft("");
-    setSelectedSources([]);
+    update((s) => {
+      const target = {
+        ...current,
+        title:
+          branchIntent || current.messages.length
+            ? current.title
+            : content.slice(0, 22),
+        updatedAt: Date.now(),
+        messages: [
+          ...(branchIntent
+            ? current.messages
+            : s.conversations.find((c) => c.id === current.id)!.messages),
+          user,
+          assistant,
+        ],
+      };
+      return {
+        ...s,
+        activeId: current.id,
+        conversations: branchIntent
+          ? [target, ...s.conversations]
+          : s.conversations.map((c) => (c.id === current.id ? target : c)),
+      };
+    });
+    if (branchIntent?.mode !== "regenerate") {
+      setDraft("");
+      setSelectedSources([]);
+    }
+    setEditing(null);
+    if (branchIntent) setHistorySearch("");
     followScroll.current = true;
     setShowLatest(false);
     textarea.current?.focus();
@@ -594,6 +665,58 @@ export default function App() {
     }
   }
 
+  function beginEditing(messageId: string) {
+    if (activeRun.current || editing) return;
+    const current = stateRef.current.conversations.find(
+      (c) => c.id === stateRef.current.activeId,
+    );
+    if (!current) return;
+    try {
+      const { question } = findBranchPoint(current, messageId);
+      setEditing({
+        conversationId: current.id,
+        messageId: question.id,
+        title: current.title,
+        previousDraft: draft,
+        previousSources: selectedSources,
+      });
+      setDraft(question.content);
+      setSelectedSources(question.sources || []);
+      textarea.current?.focus();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "无法编辑这条消息。");
+    }
+  }
+
+  function cancelEditing() {
+    if (!editing) return;
+    setDraft(editing.previousDraft);
+    setSelectedSources(editing.previousSources);
+    setEditing(null);
+    textarea.current?.focus();
+  }
+
+  function regenerate(messageId: string) {
+    if (activeRun.current || editing) return;
+    const current = stateRef.current.conversations.find(
+      (c) => c.id === stateRef.current.activeId,
+    );
+    if (!current) return;
+    try {
+      const { question } = findBranchPoint(current, messageId);
+      void send(question.content, {
+        conversationId: current.id,
+        messageId: question.id,
+        mode: "regenerate",
+        sources: question.sources || [],
+      });
+    } catch (error) {
+      setToast(
+        error instanceof Error ? error.message : "无法重新生成这条回复。",
+      );
+    }
+  }
+
   const newConversation = useCallback(() => {
     const empty = stateRef.current.conversations.find(
       (c) => c.messages.length === 0,
@@ -606,6 +729,7 @@ export default function App() {
     }));
     setDraft("");
     setSelectedSources([]);
+    setEditing(null);
     setHistorySearch("");
     followScroll.current = true;
     setShowLatest(false);
@@ -642,6 +766,7 @@ export default function App() {
     update((s) => ({ ...s, activeId: id }));
     setDraft("");
     setSelectedSources([]);
+    setEditing(null);
     followScroll.current = true;
     setShowLatest(false);
     setMenuId(null);
@@ -704,6 +829,7 @@ export default function App() {
       if (stateRef.current.activeId === id) {
         setSelectedSources([]);
         setDraft("");
+        setEditing(null);
       }
       update((s) => {
         let remaining = s.conversations.filter((c) => c.id !== id);
@@ -968,7 +1094,19 @@ export default function App() {
             </section>
           ) : (
             <div className="messages">
-              {conversation.messages.map((message, index) =>
+              {conversation.branchFrom && (
+                <BranchBanner
+                  origin={conversation.branchFrom}
+                  available={saved.conversations.some(
+                    (item) =>
+                      item.id === conversation.branchFrom?.conversationId,
+                  )}
+                  onOpen={() =>
+                    selectConversation(conversation.branchFrom!.conversationId)
+                  }
+                />
+              )}
+              {conversation.messages.map((message) =>
                 message.role === "user" ? (
                   <article className="user-message" key={message.id}>
                     <div>
@@ -991,6 +1129,10 @@ export default function App() {
                         </details>
                       ))}
                     </div>
+                    <EditMessageButton
+                      disabled={!!activeRunId || !!editing}
+                      onClick={() => beginEditing(message.id)}
+                    />
                   </article>
                 ) : (
                   <article
@@ -1083,24 +1225,11 @@ export default function App() {
                               <Copy size={15} />
                             </button>
                           )}
-                          {message.status === "error" && (
-                            <button
-                              className="retry-button"
-                              onClick={() => {
-                                const prompt = conversation.messages
-                                  .slice(0, index)
-                                  .reverse()
-                                  .find((m) => m.role === "user");
-                                if (prompt) {
-                                  setDraft(prompt.content);
-                                  setSelectedSources(prompt.sources || []);
-                                  textarea.current?.focus();
-                                }
-                              }}
-                            >
-                              编辑后重试
-                            </button>
-                          )}
+                          <RegenerateButton
+                            failed={message.status === "error"}
+                            disabled={!!activeRunId || !!editing}
+                            onClick={() => regenerate(message.id)}
+                          />
                         </div>
                       )}
                     </div>
@@ -1111,6 +1240,9 @@ export default function App() {
           )}
         </div>
         <div className={`composer-area ${isEmpty ? "welcome-composer" : ""}`}>
+          {editing && (
+            <EditingBanner title={editing.title} onCancel={cancelEditing} />
+          )}
           {showLatest && (
             <button
               className="back-to-latest"
@@ -1231,9 +1363,21 @@ export default function App() {
                   type="submit"
                   data-testid="send-button"
                   className="send-button"
-                  aria-label={currentGenerating ? "打断并发送消息" : "发送消息"}
-                  title={currentGenerating ? "打断并发送" : "发送消息"}
-                  disabled={!draft.trim()}
+                  aria-label={
+                    editing
+                      ? "发送编辑后的问题"
+                      : currentGenerating
+                        ? "打断并发送消息"
+                        : "发送消息"
+                  }
+                  title={
+                    editing
+                      ? "在新分支中发送"
+                      : currentGenerating
+                        ? "打断并发送"
+                        : "发送消息"
+                  }
+                  disabled={!draft.trim() || (!!editing && !!activeRunId)}
                 >
                   <ArrowUp size={21} strokeWidth={2.4} />
                 </button>

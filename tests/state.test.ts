@@ -7,6 +7,15 @@ function stored(value: unknown) { vi.stubGlobal('localStorage', { getItem: () =>
 afterEach(() => vi.unstubAllGlobals());
 
 describe('local history is an untrusted persistence boundary', () => {
+  it('restores valid branch provenance and drops malformed metadata', () => {
+    const saved = state();
+    saved.conversations[0].branchFrom = { conversationId: 'original', messageId: 'u1', title: '原对话', mode: 'edit' };
+    stored(createSnapshot(saved));
+    expect(restoreState().conversations[0].branchFrom).toEqual(saved.conversations[0].branchFrom);
+    stored({ ...saved, conversations: [{ ...saved.conversations[0], branchFrom: { title: {} } }] });
+    expect(restoreState().conversations[0].branchFrom).toBeUndefined();
+    expect(restoreState().recoveryNotice).toContain('数据损坏');
+  });
   it('repairs malformed nested tool results, references and errors without preserving crashable fields', () => {
     const saved = state() as unknown as { conversations: { messages: unknown[] }[] };
     saved.conversations[0].messages.push({ id: 'answer-1', role: 'assistant', content: '保留的回复', status: 'done', createdAt: 1, error: { invalid: true }, tools: [{ id: 'tool-1', name: 'search_knowledge', arguments: '{}', status: 'success', result: { type: 'knowledge', query: '流式', items: {} } }] });
