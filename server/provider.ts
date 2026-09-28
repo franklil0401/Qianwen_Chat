@@ -102,7 +102,12 @@ export async function runChat(request: ChatRequest, config: ProviderConfig, sign
         if (chunk.error) throw new PublicError('千问在生成过程中返回错误，请检查账户状态后重试。');
         const choice = chunk.choices?.[0];
         if (!choice) continue;
-        if (choice.finish_reason) finishReason = choice.finish_reason;
+        if (choice.finish_reason != null) {
+          if (!['stop', 'length', 'content_filter', 'tool_calls'].includes(choice.finish_reason)) {
+            throw new PublicError('千问返回了未知的结束原因，已保留收到的内容，请重试。');
+          }
+          finishReason = choice.finish_reason;
+        }
         const delta = choice.delta;
         if (!delta) continue;
         if (typeof delta.content === 'string' && delta.content) { content += delta.content; outputLength += delta.content.length; emit({ ...identity, type: 'text-delta', delta: delta.content }); }
@@ -112,10 +117,17 @@ export async function runChat(request: ChatRequest, config: ProviderConfig, sign
         for (const part of delta.tool_calls ?? []) {
           if (!request.useTools) throw new PublicError('模型请求了当前未启用的工具。');
           if (!Number.isInteger(part.index) || part.index < 0 || part.index >= 16) throw new PublicError('千问工具调用索引异常。');
-          const item = assembled.get(part.index) ?? { upstreamId: '', tool: { id: `${request.runId}-tool-${round}-${part.index}`, name: '', arguments: '', status: 'receiving' as const } };
-          if (typeof part.id === 'string') item.upstreamId += part.id;
-          if (typeof part.function?.name === 'string') item.tool.name += part.function.name;
-          if (typeof part.function?.arguments === 'string') item.tool.arguments += part.function.arguments;
+          const previous = assembled.get(part.index) ?? { upstreamId: '', tool: { id: `${request.runId}-tool-${round}-${part.index}`, name: '', arguments: '', status: 'receiving' as const } };
+          // Validate an immutable candidate before replacing the last safe state.
+          // Error cards are saved as history and must satisfy the next request's schema.
+          const item: AssembledTool = {
+            upstreamId: previous.upstreamId + (typeof part.id === 'string' ? part.id : ''),
+            tool: {
+              ...previous.tool,
+              name: previous.tool.name + (typeof part.function?.name === 'string' ? part.function.name : ''),
+              arguments: previous.tool.arguments + (typeof part.function?.arguments === 'string' ? part.function.arguments : ''),
+            },
+          };
           if (item.tool.arguments.length > 8_000 || item.tool.name.length > 100 || item.upstreamId.length > 200) throw new PublicError('千问工具参数超过限制。');
           assembled.set(part.index, item);
           sendTool(item.tool);
@@ -128,6 +140,7 @@ export async function runChat(request: ChatRequest, config: ProviderConfig, sign
         emit({ ...identity, type: 'done', reason: 'limit' }); return;
       }
       if (finishReason === 'content_filter') throw new PublicError('模型未能完成此请求，请调整问题后重试。');
+      if (finishReason === 'tool_calls' && !assembled.size) throw new PublicError('模型声明了工具调用，但未返回调用内容，请重试。');
       if (!assembled.size) { if (!content) throw new PublicError('千问返回了空回复，请重试。'); emit({ ...identity, type: 'done', reason: 'stop' }); return; }
       if (finishReason !== 'tool_calls') throw new PublicError('模型工具调用未正常完成，未执行不完整参数。');
       const ordered = [...assembled.entries()].sort(([a], [b]) => a - b).map(([, item]) => item);

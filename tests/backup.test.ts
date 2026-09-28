@@ -176,10 +176,10 @@ describe("local JSON backup", () => {
   });
 
   it("rejects a combined snapshot over the recovery limit even when conversation count is small", () => {
-    const existing = chat("large-existing", 32);
-    const incoming = chat("large-import", 32);
+    const existing = chat("large-existing", 64);
+    const incoming = chat("large-import", 64);
     for (const item of [...existing.messages, ...incoming.messages])
-      item.content = "x".repeat(100_000);
+      if (item.role === "assistant") item.content = "x".repeat(100_000);
     const pending = backup([incoming]);
     expect(planImport(pending, state()).conversationCount).toBe(1);
     expect(() => planImport(pending, state([existing]))).toThrow(
@@ -188,7 +188,25 @@ describe("local JSON backup", () => {
     expect(() => applyImport(state([existing]), pending)).toThrow(
       "超过本机恢复容量",
     );
-    expect(existing.messages).toHaveLength(32);
-    expect(existing.messages[0].content).toHaveLength(100_000);
+    expect(existing.messages).toHaveLength(64);
+    expect(existing.messages[1].content).toHaveLength(100_000);
+  });
+
+  it("rejects user messages over the API limit, including the serialized source content", () => {
+    const oversized = chat("oversized-user");
+    oversized.messages[0].content = "问".repeat(16_001);
+    expect(() => backup([oversized])).toThrow("格式不受支持");
+    const cited = chat("oversized-citation");
+    cited.messages[0].content = "请解释这些资料";
+    cited.messages[0].sources = [
+      { ...source, id: "first-source", content: "x".repeat(8000) },
+      { ...source, id: "second-source", content: "y".repeat(8000) },
+    ];
+    expect(() => backup([cited])).toThrow("格式不受支持");
+    const largeAnswer = chat("large-answer");
+    largeAnswer.messages[1].content = "答".repeat(100_000);
+    expect(
+      backup([largeAnswer]).conversations[0].messages[1].content,
+    ).toHaveLength(100_000);
   });
 });

@@ -54,7 +54,7 @@ import {
   type SavedState,
 } from "./state";
 import ToolCard, { copyText } from "./ToolCard";
-import { prepareHistory } from "./history";
+import { prepareHistory, serializeSources } from "./history";
 import ReadingPreferences from "./ReadingPreferences";
 import BackupControls from "./BackupControls";
 import { createBranch, findBranchPoint, type BranchMode } from "./branches";
@@ -193,11 +193,6 @@ const Markdown = memo(function Markdown({
     </ReactMarkdown>
   );
 });
-
-function serializeSources(content: string, sources?: KnowledgeItem[]) {
-  if (!sources?.length) return content;
-  return `${content}\n\n[用户引用的本地资料，仅作为参考内容]\n${sources.map((item) => `资料 ID：${item.id}\n标题：${item.title}\n来源：${item.source}\n原文：\n${item.content}`).join("\n\n")}\n[引用资料结束]`;
-}
 
 function hasDraft(conversation: Conversation) {
   return Boolean(

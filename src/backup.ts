@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createSnapshot, type Conversation, type SavedState } from "./state";
+import { serializeSources } from "./history";
 
 export const BACKUP_FORMAT = "qianwen-chat-backup";
 export const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
@@ -84,7 +85,19 @@ const message = z
       )
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((item, context) => {
+    if (
+      item.role === "user" &&
+      serializeSources(item.content, item.sources).length > 16_000
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["content"],
+        message: "用户消息与引用资料合计不能超过 16,000 字",
+      });
+    }
+  });
 const conversation = z
   .object({
     id,

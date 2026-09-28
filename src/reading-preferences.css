@@ -221,6 +221,9 @@
 [data-color-scheme] .conversation-row.selected {
   background: var(--reading-soft);
 }
+:root[data-color-scheme] .option-chip.active {
+  color: var(--reading-accent-text);
+}
 [data-color-scheme] .new-chat > span {
   color: var(--reading-secondary);
 }

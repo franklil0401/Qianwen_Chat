@@ -59,10 +59,10 @@ test('both themes keep tool summaries, reasoning and errors readable at desktop 
     await page.keyboard.press('Escape');
     await expect(page.locator('.knowledge-summary')).toHaveCSS('font-size', '16px');
     await expect(page.locator('.reasoning-panel > div')).toHaveCSS('font-size', '16px');
-    const contrasts = await page.evaluate(() => {
+    await expect.poll(async () => page.evaluate(() => {
       const rgb = (s: string) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
       const lum = (v: number[]) => v.map(n => n / 255).map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0);
-      return ['.knowledge-summary', '.tool-success .tool-status', '.reasoning-panel > div', '.tool-error-message', '.markdown pre code'].map(selector => {
+      const contrasts = ['.knowledge-summary', '.tool-success .tool-status', '.reasoning-panel > div', '.tool-error-message', '.markdown pre code', '.new-chat', '.option-chip.active', '.edit-message-button', '.regenerate-button'].map(selector => {
         const el = document.querySelector(selector)!;
         let ancestor: Element | null = el;
         let bg = 'rgb(255, 255, 255)';
@@ -70,9 +70,9 @@ test('both themes keep tool summaries, reasoning and errors readable at desktop 
         const a = lum(rgb(getComputedStyle(el).color)); const b = lum(rgb(bg));
         return { selector, ratio: (Math.max(a, b) + .05) / (Math.min(a, b) + .05) };
       });
-    });
-    for (const item of contrasts) expect(item.ratio, `${theme} ${item.selector}`).toBeGreaterThanOrEqual(4.5);
+      return contrasts.filter(item => item.ratio < 4.5);
+    }), { message: `${theme} text and actions must reach 4.5:1 after theme transition` }).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-    if (process.env.UPDATE_SCREENSHOTS === '1') await page.screenshot({ path: `docs/screenshots/round6-${theme === '浅色' ? 'light' : 'dark'}.png`, fullPage: true });
+    if (process.env.UPDATE_SCREENSHOTS === '1') await page.screenshot({ path: `docs/screenshots/round6-${theme === '浅色' ? 'light' : 'dark'}.png`, fullPage: true, animations: 'disabled' });
   }
 });
