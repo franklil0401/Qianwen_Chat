@@ -89,3 +89,66 @@ test('1024px layout remains within viewport', async ({ page }) => {
   await expect(page.getByTestId('message-input')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
+
+test('desktop shortcut creates a conversation and history search finds content', async ({ page }) => {
+  await page.route('**/api/chat', route => reply(route, [{ type: 'text-delta', delta: '关于流式解析的详细回答。' }, { type: 'done', reason: 'stop' }]));
+  await page.goto('/');
+  await send(page, '讨论流式输出');
+  await expect(page.getByTestId('assistant-message')).toContainText('详细回答');
+  await page.keyboard.press('Control+k');
+  await expect(page.getByTestId('assistant-message')).toHaveCount(0);
+  await expect(page.getByTestId('message-input')).toBeFocused();
+  await send(page, '讨论计算器');
+  await expect(page.getByTestId('conversation-item')).toHaveCount(2);
+  await page.getByTestId('history-search').fill('计算器');
+  await expect(page.getByTestId('conversation-item')).toHaveCount(1);
+  await expect(page.getByTestId('conversation-item')).toContainText('讨论计算器');
+  await page.getByTestId('history-search').fill('详细回答');
+  await expect(page.getByTestId('conversation-item')).toHaveCount(2);
+  await page.getByTestId('history-search').fill('不存在的对话');
+  await expect(page.getByTestId('conversation-item')).toHaveCount(0);
+});
+
+test('code can be copied without the rest of the answer', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.route('**/api/chat', route => reply(route, [{ type: 'text-delta', delta: '这是代码示例：\n\n```ts\nconst message = "你好，千问";\n```\n\n这部分不应进入剪贴板。' }, { type: 'done', reason: 'stop' }]));
+  await page.goto('/');
+  await send(page, '给我代码');
+  await page.getByRole('button', { name: '复制代码', exact: true }).click();
+  await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim())).toBe('const message = "你好，千问";');
+});
+
+test('Chinese composition and Shift+Enter do not accidentally send', async ({ page }) => {
+  let requests = 0;
+  await page.route('**/api/chat', async route => { requests++; await reply(route, [{ type: 'text-delta', delta: '已收到两行内容。' }, { type: 'done', reason: 'stop' }]); });
+  await page.goto('/');
+  const input = page.getByTestId('message-input');
+  await input.fill('中文输入中');
+  await input.dispatchEvent('compositionstart');
+  await input.press('Enter');
+  expect(requests).toBe(0);
+  await input.dispatchEvent('compositionend');
+  await input.fill('第一行');
+  await input.press('Shift+Enter');
+  await input.pressSequentially('第二行');
+  await expect(input).toHaveValue('第一行\n第二行');
+  await input.press('Enter');
+  await expect(page.getByTestId('assistant-message')).toContainText('已收到两行内容');
+  expect(requests).toBe(1);
+});
+
+test('long code and tables stay inside the desktop conversation width', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const content = '# 技术笔记\n\n' + Array.from({ length: 12 }, (_, i) => `第 ${i + 1} 段内容。`.repeat(12)).join('\n\n')
+    + '\n\n```js\n' + 'const longIdentifier = "' + 'x'.repeat(240) + '";\n```\n\n'
+    + '| 功能 | 说明 |\n| --- | --- |\n| SSE | ' + '流式输出'.repeat(70) + ' |';
+  await page.route('**/api/chat', route => reply(route, [{ type: 'text-delta', delta: content }, { type: 'done', reason: 'stop' }]));
+  await page.goto('/');
+  await send(page, '长文阅读测试');
+  await expect(page.getByTestId('assistant-message')).toContainText('技术笔记');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  const scroll = page.locator('.chat-scroll');
+  await scroll.evaluate(element => { element.scrollTop = 0; });
+  await page.getByRole('button', { name: '回到最新消息' }).click();
+  await expect.poll(() => scroll.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(100);
+});
