@@ -1219,6 +1219,36 @@ h1 {
   line-height: 1.7;
   font-size: 12px;
 }
+.notice-with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.notice-action {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #dfc99e;
+  color: #96703c;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.notice-action:hover:not(:disabled) {
+  background: #f7ecd7;
+}
+.notice-action:disabled {
+  opacity: 0.6;
+}
+.recovery-notice {
+  background: #f7f4fd;
+  border-color: #e3daef;
+  color: #8b739f;
+}
+.recovery-notice .icon-button {
+  width: 24px;
+  height: 24px;
+}
 .toast {
   position: fixed;
   bottom: 37px;

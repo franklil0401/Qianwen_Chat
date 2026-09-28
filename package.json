@@ -1,6 +1,6 @@
 {
   "name": "qianwen-chat",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,8 @@
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
+    "start:background": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-local.ps1",
+    "stop:background": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-local.ps1",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",

@@ -1,6 +1,7 @@
 import {
   Children,
   isValidElement,
+  memo,
   useCallback,
   useEffect,
   useRef,
@@ -45,6 +46,7 @@ import type {
 import { readSSE } from "../shared/sse";
 import {
   createConversation,
+  createSnapshot,
   restoreState,
   STORAGE_KEY,
   type Conversation,
@@ -52,6 +54,7 @@ import {
   type SavedState,
 } from "./state";
 import ToolCard, { copyText } from "./ToolCard";
+import { prepareHistory } from "./history";
 
 interface ActiveRun {
   id: string;
@@ -143,7 +146,7 @@ function CodeBlock({
   );
 }
 
-function Markdown({
+const Markdown = memo(function Markdown({
   content,
   onToast,
 }: {
@@ -167,7 +170,7 @@ function Markdown({
       {content}
     </ReactMarkdown>
   );
-}
+});
 
 function serializeSources(content: string, sources?: KnowledgeItem[]) {
   if (!sources?.length) return content;
@@ -181,6 +184,7 @@ export default function App() {
   const [selectedSources, setSelectedSources] = useState<KnowledgeItem[]>([]);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState(false);
+  const [healthChecking, setHealthChecking] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [toast, setToast] = useState("");
   const [storageError, setStorageError] = useState(false);
@@ -196,6 +200,9 @@ export default function App() {
   const followScroll = useRef(true);
   const composing = useRef(false);
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const healthRequest = useRef<AbortController | null>(null);
+  const modalElement = useRef<HTMLDivElement>(null);
+  const modalReturnFocus = useRef<HTMLElement | null>(null);
 
   const update = useCallback((fn: (state: SavedState) => SavedState) => {
     const next = fn(stateRef.current);
@@ -225,24 +232,121 @@ export default function App() {
     [update],
   );
 
-  useEffect(() => {
+  const checkHealth = useCallback(async () => {
+    healthRequest.current?.abort();
     const controller = new AbortController();
-    fetch("/api/health", { signal: controller.signal })
-      .then((r) => {
-        if (!r.ok) throw new Error();
-        return r.json();
-      })
-      .then(setHealth)
-      .catch(() => {
-        if (!controller.signal.aborted) setHealthError(true);
+    healthRequest.current = controller;
+    setHealthChecking(true);
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch("/api/health", {
+        signal: controller.signal,
       });
-    return () => controller.abort();
+      if (!response.ok) throw new Error("本地服务状态异常");
+      const result = (await response.json()) as HealthResponse;
+      if (
+        typeof result.configured !== "boolean" ||
+        typeof result.model !== "string"
+      )
+        throw new Error("本地服务响应异常");
+      if (healthRequest.current !== controller) return;
+      setHealth(result);
+      setHealthError(false);
+    } catch {
+      if (healthRequest.current === controller) {
+        setHealthError(true);
+        setHealth(null);
+      }
+    } finally {
+      clearTimeout(timer);
+      if (healthRequest.current === controller) {
+        healthRequest.current = null;
+        setHealthChecking(false);
+      }
+    }
   }, []);
+  useEffect(() => {
+    void checkHealth();
+    return () => {
+      healthRequest.current?.abort();
+      healthRequest.current = null;
+    };
+  }, [checkHealth]);
+  function openModal(next: Exclude<Modal, null>) {
+    const active =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    modalReturnFocus.current =
+      active
+        ?.closest(".conversation-row")
+        ?.querySelector<HTMLElement>(".conversation-more") || active;
+    setModal(next);
+  }
+  useEffect(() => {
+    if (!modal || !modalElement.current) return;
+    const dialog = modalElement.current;
+    const focusable = () =>
+      Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((node) => node.getClientRects().length > 0);
+    const initial =
+      dialog.querySelector<HTMLElement>("input, .secondary-button") ||
+      focusable()[0] ||
+      dialog;
+    initial.focus();
+    const trapTab = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Tab") return;
+      const elements = focusable();
+      const first = elements[0];
+      const last = elements.at(-1);
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      if (
+        event.shiftKey &&
+        (document.activeElement === first ||
+          !dialog.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === last ||
+          !dialog.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const keepFocus = (event: FocusEvent) => {
+      if (event.target instanceof Node && !dialog.contains(event.target))
+        (focusable()[0] || dialog).focus();
+    };
+    document.addEventListener("keydown", trapTab);
+    document.addEventListener("focusin", keepFocus);
+    return () => {
+      document.removeEventListener("keydown", trapTab);
+      document.removeEventListener("focusin", keepFocus);
+      const target = modalReturnFocus.current;
+      queueMicrotask(() => {
+        if (target?.isConnected) target.focus();
+        else textarea.current?.focus();
+      });
+    };
+  }, [modal]);
   useEffect(() => {
     if (persistTimer.current) clearTimeout(persistTimer.current);
     persistTimer.current = setTimeout(() => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify(createSnapshot(saved)),
+        );
         setStorageError(false);
       } catch {
         setStorageError(true);
@@ -255,7 +359,10 @@ export default function App() {
   useEffect(() => {
     const save = () => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(stateRef.current));
+        localStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify(createSnapshot(stateRef.current)),
+        );
       } catch {
         /* Page is closing. */
       }
@@ -314,6 +421,11 @@ export default function App() {
           : t,
       ),
     }));
+    if (
+      run.conversationId === stateRef.current.activeId &&
+      !modalElement.current
+    )
+      textarea.current?.focus();
   }, [updateMessage]);
 
   async function send(text = draft) {
@@ -325,7 +437,6 @@ export default function App() {
       );
       return;
     }
-    stop();
     const state = stateRef.current;
     const current = state.conversations.find((c) => c.id === state.activeId)!;
     const user: Message = {
@@ -336,6 +447,30 @@ export default function App() {
       createdAt: Date.now(),
       sources: selectedSources.length ? [...selectedSources] : undefined,
     };
+    let messages: ChatRequest["messages"];
+    try {
+      messages = prepareHistory(
+        [...current.messages, user]
+          .filter((message) => message.content || message.tools?.length)
+          .map(({ role, content: messageContent, tools, sources }) => ({
+            role,
+            content: serializeSources(messageContent, sources),
+            tools: tools?.map((tool) =>
+              ["receiving", "queued", "running"].includes(tool.status)
+                ? { ...tool, status: "cancelled" as const }
+                : tool,
+            ),
+          })),
+      );
+    } catch (error) {
+      setToast(
+        error instanceof Error
+          ? error.message
+          : "本轮上下文过长，请缩短问题或减少引用后重试。",
+      );
+      return;
+    }
+    stop();
     const assistant: Message = {
       id: crypto.randomUUID(),
       role: "assistant",
@@ -375,14 +510,7 @@ export default function App() {
       runId: run.id,
       conversationId: current.id,
       messageId: assistant.id,
-      messages: [...current.messages, user]
-        .filter((m) => m.content || m.tools?.length)
-        .slice(-40)
-        .map(({ role, content: messageContent, tools, sources }) => ({
-          role,
-          content: serializeSources(messageContent, sources),
-          tools,
-        })),
+      messages,
       useTools: state.useTools,
       thinking: state.thinking,
     };
@@ -592,7 +720,7 @@ export default function App() {
 
   return (
     <div className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
-      <aside className="sidebar" aria-label="会话侧边栏">
+      <aside className="sidebar" aria-label="会话侧边栏" inert={!!modal}>
         <div className="sidebar-brand">
           <Brand small />
           <span>
@@ -670,7 +798,7 @@ export default function App() {
                   <button
                     onClick={() => {
                       setRenameValue(c.title);
-                      setModal({ type: "rename", conversation: c });
+                      openModal({ type: "rename", conversation: c });
                       setMenuId(null);
                     }}
                   >
@@ -680,7 +808,7 @@ export default function App() {
                   <button
                     className="danger-text"
                     onClick={() => {
-                      setModal({ type: "delete", conversation: c });
+                      openModal({ type: "delete", conversation: c });
                       setMenuId(null);
                     }}
                   >
@@ -710,7 +838,7 @@ export default function App() {
           </div>
           <button
             className="profile-button"
-            onClick={() => setModal({ type: "about" })}
+            onClick={() => openModal({ type: "about" })}
           >
             <span className="avatar">你</span>
             <span>
@@ -721,7 +849,7 @@ export default function App() {
           </button>
         </div>
       </aside>
-      <main className="main-panel">
+      <main className="main-panel" inert={!!modal}>
         <header className="topbar">
           <div className="topbar-left">
             {!sidebarOpen && (
@@ -739,25 +867,57 @@ export default function App() {
             <span className="model-badge">{health?.model || "Qwen"}</span>
           </div>
           <div
-            className={`connection-status ${health?.configured ? "online" : ""}`}
+            className={`connection-status ${health && !healthError ? "online" : ""}`}
           >
             <span />
-            {healthError
-              ? "服务未连接"
-              : health
-                ? health.configured
-                  ? "已连接千问"
-                  : "未配置密钥"
-                : "连接中"}
+            {healthChecking
+              ? "正在检查本地服务"
+              : healthError
+                ? "服务未连接"
+                : health
+                  ? health.configured
+                    ? "本地服务正常 · 千问已配置"
+                    : "本地服务正常 · 未配置密钥"
+                  : "等待检查"}
           </div>
         </header>
-        {(healthError || health?.configured === false || storageError) && (
-          <div className="notice-banner" role="status">
-            {storageError
-              ? "浏览器存储空间不足，当前消息仍可查看，但可能无法在刷新后恢复。"
-              : healthError
-                ? "本地服务未连接，请检查服务是否启动并刷新页面。"
+        {(healthError || health?.configured === false) && (
+          <div className="notice-banner notice-with-action" role="status">
+            <span>
+              {healthError
+                ? "暂时无法连接本地服务，请确认服务已启动后重试。"
                 : "请在启动终端配置系统环境变量 Qianwen_api_key，然后重启服务。"}
+            </span>
+            <button
+              className="notice-action"
+              aria-label="重新连接"
+              disabled={healthChecking}
+              onClick={() => void checkHealth()}
+            >
+              {healthChecking ? "正在重连…" : "重新连接"}
+            </button>
+          </div>
+        )}
+        {storageError && (
+          <div className="notice-banner" role="status">
+            浏览器存储空间不足，当前消息仍可查看，但可能无法在刷新后恢复。
+          </div>
+        )}
+        {saved.recoveryNotice && (
+          <div
+            className="notice-banner notice-with-action recovery-notice"
+            role="status"
+          >
+            <span>{saved.recoveryNotice}</span>
+            <button
+              className="icon-button"
+              aria-label="关闭恢复提示"
+              onClick={() =>
+                update((state) => ({ ...state, recoveryNotice: undefined }))
+              }
+            >
+              <X size={16} />
+            </button>
           </div>
         )}
         <div
@@ -1096,6 +1256,8 @@ export default function App() {
         <div className="modal-overlay" onClick={() => setModal(null)}>
           <div
             className="modal"
+            ref={modalElement}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-labelledby="modal-title"
@@ -1145,7 +1307,6 @@ export default function App() {
                 </h2>
                 {modal.type === "rename" ? (
                   <input
-                    autoFocus
                     aria-label="对话名称"
                     value={renameValue}
                     onChange={(e) => setRenameValue(e.target.value)}

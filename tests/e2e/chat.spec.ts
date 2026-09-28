@@ -224,3 +224,117 @@ test('empty search results and a failed tool are actionable and do not block cha
   await expect(page.getByTestId('stop-button')).toHaveCount(0);
   await expect(page.getByTestId('message-input')).toBeEnabled();
 });
+
+test('corrupt nested history is repaired without a blank page', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => localStorage.setItem('qianwen-workspace-v1', JSON.stringify({ version: 1, activeId: 'c1', thinking: false, useTools: true, conversations: [{ id: 'c1', title: '损坏数据测试', updatedAt: 1, messages: [
+    { id: 'u1', role: 'user', content: '用户消息保留', status: 'done', createdAt: 1, sources: {} },
+    { id: 'a1', role: 'assistant', content: '回复也保留', status: 'done', createdAt: 2, error: {}, tools: [{ id: 't1', name: 'search_knowledge', arguments: '{}', status: 'success', result: { type: 'knowledge', query: 'test', items: {} } }] },
+  ] }] })));
+  await page.goto('/');
+  await expect(page.getByTestId('assistant-message')).toContainText('回复也保留');
+  await expect(page.getByTestId('tool-card')).toContainText('历史工具结果无法恢复');
+  await expect(page.getByTestId('message-input')).toBeEnabled();
+  await page.getByRole('button', { name: '关闭恢复提示' }).click();
+  expect(errors).toEqual([]);
+});
+
+test('refresh restores a pending tool as interrupted without replaying it', async ({ page }) => {
+  let calls = 0;
+  await page.addInitScript(() => localStorage.setItem('qianwen-workspace-v1', JSON.stringify({ version: 1, activeId: 'c1', thinking: false, useTools: true, conversations: [{ id: 'c1', title: '中断恢复', updatedAt: 1, messages: [
+    { id: 'u1', role: 'user', content: '计算旧问题', status: 'done', createdAt: 1 },
+    { id: 'a1', role: 'assistant', content: '已有部分回答', status: 'streaming', createdAt: 2, tools: [{ id: 't1', name: 'calculate', arguments: '{', status: 'receiving' }] },
+  ] }] })));
+  await page.route('**/api/chat', async route => { calls++; await reply(route, [{ type: 'text-delta', delta: '可以继续正常对话。' }, { type: 'done', reason: 'stop' }]); });
+  await page.goto('/');
+  await expect(page.getByTestId('assistant-message')).toContainText('已停止生成');
+  await expect(page.getByTestId('tool-card')).toContainText('已取消');
+  expect(calls).toBe(0);
+  await send(page, '继续新问题');
+  await expect(page.getByTestId('assistant-message').last()).toContainText('可以继续正常对话');
+  expect(calls).toBe(1);
+});
+
+test('a new question in another conversation cancels the old run without mixing messages', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/chat', async route => {
+    if (++calls === 1) {
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      await reply(route, [{ type: 'text-delta', delta: '旧会话迟到内容' }, { type: 'done', reason: 'stop' }]);
+    } else await reply(route, [{ type: 'text-delta', delta: '新会话独立回复' }, { type: 'done', reason: 'stop' }]);
+  });
+  await page.goto('/');
+  await send(page, '旧会话慢请求');
+  await expect(page.getByTestId('stop-button')).toBeVisible();
+  await page.keyboard.press('Control+k');
+  await send(page, '新会话的新问题');
+  await expect(page.getByTestId('assistant-message')).toContainText('新会话独立回复');
+  await page.getByTestId('conversation-item').filter({ hasText: '旧会话慢请求' }).locator('.conversation-button').click();
+  await expect(page.getByTestId('assistant-message')).toContainText('已停止生成');
+  await page.waitForTimeout(1400);
+  await expect(page.getByText('旧会话迟到内容', { exact: true })).toHaveCount(0);
+});
+
+test('deleting a running conversation cancels it and leaves a usable new conversation', async ({ page }) => {
+  let cancellations = 0;
+  await page.route('**/api/runs/*/cancel', route => { cancellations++; return route.fulfill({ json: { cancelled: true } }); });
+  await page.route('**/api/chat', async route => {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    await reply(route, [{ type: 'text-delta', delta: '已删除会话的内容' }, { type: 'done', reason: 'stop' }]);
+  });
+  await page.goto('/');
+  await send(page, '删除运行中的会话');
+  await expect(page.getByTestId('stop-button')).toBeVisible();
+  await page.getByRole('button', { name: '管理对话：删除运行中的会话' }).click();
+  await page.getByRole('button', { name: '删除对话', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: '删除对话', exact: true }).click();
+  await expect(page.getByTestId('assistant-message')).toHaveCount(0);
+  await expect(page.getByTestId('message-input')).toBeFocused();
+  await expect.poll(() => cancellations).toBe(1);
+  await page.waitForTimeout(1600);
+  await expect(page.getByText('已删除会话的内容', { exact: true })).toHaveCount(0);
+});
+
+test('conversation rename dialog contains keyboard focus and restores its trigger', async ({ page }) => {
+  await page.route('**/api/chat', route => reply(route, [{ type: 'text-delta', delta: '完成' }, { type: 'done', reason: 'stop' }]));
+  await page.goto('/');
+  await send(page, '准备重命名');
+  const manage = page.getByRole('button', { name: '管理对话：准备重命名' });
+  await manage.click();
+  await page.getByRole('button', { name: '重命名', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: '对话名称' })).toBeFocused();
+  for (let step = 0; step < 6; step++) {
+    await page.keyboard.press('Tab');
+    expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[role="dialog"]')))).toBeTruthy();
+  }
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(manage).toBeFocused();
+  await manage.click();
+  await page.getByRole('button', { name: '重命名', exact: true }).click();
+  await page.getByRole('textbox', { name: '对话名称' }).fill('重新命名成功');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await expect(page.getByTestId('conversation-item')).toContainText('重新命名成功');
+});
+
+test('storage failure is visible while chatting remains functional', async ({ page }) => {
+  await page.addInitScript(() => { Storage.prototype.setItem = () => { throw new DOMException('Full', 'QuotaExceededError'); }; });
+  await page.route('**/api/chat', route => reply(route, [{ type: 'text-delta', delta: '存储异常时仍然可用。' }, { type: 'done', reason: 'stop' }]));
+  await page.goto('/');
+  await send(page, '继续聊天');
+  await expect(page.getByTestId('assistant-message')).toContainText('存储异常时仍然可用');
+  await expect(page.getByText(/浏览器存储空间不足/)).toBeVisible();
+});
+
+test('local service status can reconnect after a health failure', async ({ page }) => {
+  let available = false;
+  await page.route('**/api/health', route => available ? route.fulfill({ json: { configured: true, model: 'qwen-plus', tools: ['calculate', 'search_knowledge'] } }) : route.abort('failed'));
+  await page.goto('/');
+  const reconnect = page.getByRole('button', { name: '重新连接', exact: true });
+  await expect(reconnect).toBeVisible();
+  available = true;
+  await reconnect.click();
+  await expect(page.getByText(/本地服务正常/)).toBeVisible();
+  await expect(reconnect).toHaveCount(0);
+});
