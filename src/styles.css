@@ -213,6 +213,17 @@ button svg {
 .conversation-button svg {
   flex-shrink: 0;
 }
+.conversation-button .draft-badge {
+  margin-left: auto;
+  color: #9c7890;
+  background: #f1e8ee;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 11px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  line-height: 1.3;
+}
 .conversation-more {
   width: 27px;
   height: 28px;

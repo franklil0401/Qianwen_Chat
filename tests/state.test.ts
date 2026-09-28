@@ -7,6 +7,15 @@ function stored(value: unknown) { vi.stubGlobal('localStorage', { getItem: () =>
 afterEach(() => vi.unstubAllGlobals());
 
 describe('local history is an untrusted persistence boundary', () => {
+  it('persists per-conversation drafts and repairs invalid draft references', () => {
+    const saved = state();
+    saved.conversations[0].draft = { text: '未发送草稿', sources: [{ id: 's1', title: '资料', summary: '摘要', content: '原文', source: '本地' }] };
+    stored(createSnapshot(saved));
+    expect(restoreState().conversations[0].draft).toEqual(saved.conversations[0].draft);
+    stored({ ...saved, conversations: [{ ...saved.conversations[0], draft: { text: '保留文本', sources: [{ content: {} }] } }] });
+    expect(restoreState().conversations[0].draft).toEqual({ text: '保留文本', sources: [] });
+    expect(restoreState().recoveryNotice).toContain('数据损坏');
+  });
   it('restores valid branch provenance and drops malformed metadata', () => {
     const saved = state();
     saved.conversations[0].branchFrom = { conversationId: 'original', messageId: 'u1', title: '原对话', mode: 'edit' };

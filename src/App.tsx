@@ -79,8 +79,8 @@ interface EditingSession {
   conversationId: string;
   messageId: string;
   title: string;
-  previousDraft: string;
-  previousSources: KnowledgeItem[];
+  text: string;
+  sources: KnowledgeItem[];
 }
 type Modal =
   | { type: "rename" | "delete"; conversation: Conversation }
@@ -197,12 +197,37 @@ function serializeSources(content: string, sources?: KnowledgeItem[]) {
   return `${content}\n\n[用户引用的本地资料，仅作为参考内容]\n${sources.map((item) => `资料 ID：${item.id}\n标题：${item.title}\n来源：${item.source}\n原文：\n${item.content}`).join("\n\n")}\n[引用资料结束]`;
 }
 
+function hasDraft(conversation: Conversation) {
+  return Boolean(
+    conversation.draft?.text.length || conversation.draft?.sources.length,
+  );
+}
+
+function conversationLabel(conversation: Conversation) {
+  if (conversation.messages.length || conversation.title !== "新对话")
+    return conversation.title;
+  return (
+    conversation.draft?.text.trim().slice(0, 22) ||
+    conversation.draft?.sources[0]?.title ||
+    conversation.title
+  );
+}
+
 export default function App() {
   const [saved, setSaved] = useState<SavedState>(restoreState);
   const stateRef = useRef(saved);
-  const [draft, setDraft] = useState("");
-  const [selectedSources, setSelectedSources] = useState<KnowledgeItem[]>([]);
   const [editing, setEditing] = useState<EditingSession | null>(null);
+  const conversation = saved.conversations.find(
+    (c) => c.id === saved.activeId,
+  )!;
+  const draft =
+    editing?.conversationId === saved.activeId
+      ? editing.text
+      : conversation.draft?.text || "";
+  const selectedSources =
+    editing?.conversationId === saved.activeId
+      ? editing.sources
+      : conversation.draft?.sources || [];
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState(false);
   const [healthChecking, setHealthChecking] = useState(true);
@@ -230,6 +255,52 @@ export default function App() {
     stateRef.current = next;
     setSaved(next);
   }, []);
+
+  function updateComposer(
+    transform: (value: { text: string; sources: KnowledgeItem[] }) => {
+      text: string;
+      sources: KnowledgeItem[];
+    },
+  ) {
+    if (editing?.conversationId === stateRef.current.activeId) {
+      setEditing((current) =>
+        current
+          ? {
+              ...current,
+              ...transform({ text: current.text, sources: current.sources }),
+            }
+          : current,
+      );
+      return;
+    }
+    const id = stateRef.current.activeId;
+    update((state) => ({
+      ...state,
+      conversations: state.conversations.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              draft: transform(item.draft || { text: "", sources: [] }),
+              updatedAt: Date.now(),
+            }
+          : item,
+      ),
+    }));
+  }
+  function setDraft(value: string | ((previous: string) => string)) {
+    updateComposer((current) => ({
+      ...current,
+      text: typeof value === "function" ? value(current.text) : value,
+    }));
+  }
+  function setSelectedSources(
+    value: KnowledgeItem[] | ((previous: KnowledgeItem[]) => KnowledgeItem[]),
+  ) {
+    updateComposer((current) => ({
+      ...current,
+      sources: typeof value === "function" ? value(current.sources) : value,
+    }));
+  }
   const updateMessage = useCallback(
     (
       conversationId: string,
@@ -396,9 +467,6 @@ export default function App() {
     const timer = setTimeout(() => setToast(""), 2600);
     return () => clearTimeout(timer);
   }, [toast]);
-  const conversation = saved.conversations.find(
-    (c) => c.id === saved.activeId,
-  )!;
   const isEmpty = !conversation?.messages.length;
   const currentGenerating =
     activeRun.current?.conversationId === saved.activeId && !!activeRunId;
@@ -406,9 +474,13 @@ export default function App() {
   const visibleConversations = saved.conversations
     .filter(
       (c) =>
-        c.messages.length &&
+        (c.messages.length || hasDraft(c)) &&
         (!searchQuery ||
           c.title.toLocaleLowerCase().includes(searchQuery) ||
+          c.draft?.text.toLocaleLowerCase().includes(searchQuery) ||
+          c.draft?.sources.some((source) =>
+            source.title.toLocaleLowerCase().includes(searchQuery),
+          ) ||
           c.messages.some((m) =>
             m.content.toLocaleLowerCase().includes(searchQuery),
           )),
@@ -547,6 +619,7 @@ export default function App() {
     update((s) => {
       const target = {
         ...current,
+        draft: undefined,
         title:
           branchIntent || current.messages.length
             ? current.title
@@ -568,10 +641,6 @@ export default function App() {
           : s.conversations.map((c) => (c.id === current.id ? target : c)),
       };
     });
-    if (branchIntent?.mode !== "regenerate") {
-      setDraft("");
-      setSelectedSources([]);
-    }
     setEditing(null);
     if (branchIntent) setHistorySearch("");
     followScroll.current = true;
@@ -677,11 +746,9 @@ export default function App() {
         conversationId: current.id,
         messageId: question.id,
         title: current.title,
-        previousDraft: draft,
-        previousSources: selectedSources,
+        text: question.content,
+        sources: question.sources || [],
       });
-      setDraft(question.content);
-      setSelectedSources(question.sources || []);
       textarea.current?.focus();
     } catch (error) {
       setToast(error instanceof Error ? error.message : "无法编辑这条消息。");
@@ -690,8 +757,6 @@ export default function App() {
 
   function cancelEditing() {
     if (!editing) return;
-    setDraft(editing.previousDraft);
-    setSelectedSources(editing.previousSources);
     setEditing(null);
     textarea.current?.focus();
   }
@@ -719,7 +784,7 @@ export default function App() {
 
   const newConversation = useCallback(() => {
     const empty = stateRef.current.conversations.find(
-      (c) => c.messages.length === 0,
+      (c) => c.messages.length === 0 && !hasDraft(c),
     );
     const next = empty || createConversation();
     update((s) => ({
@@ -727,8 +792,6 @@ export default function App() {
       activeId: next.id,
       conversations: empty ? s.conversations : [next, ...s.conversations],
     }));
-    setDraft("");
-    setSelectedSources([]);
     setEditing(null);
     setHistorySearch("");
     followScroll.current = true;
@@ -764,8 +827,6 @@ export default function App() {
   }, [newConversation, stop, modal, menuId]);
   function selectConversation(id: string) {
     update((s) => ({ ...s, activeId: id }));
-    setDraft("");
-    setSelectedSources([]);
     setEditing(null);
     followScroll.current = true;
     setShowLatest(false);
@@ -827,8 +888,6 @@ export default function App() {
     } else {
       if (activeRun.current?.conversationId === id) stop();
       if (stateRef.current.activeId === id) {
-        setSelectedSources([]);
-        setDraft("");
         setEditing(null);
       }
       update((s) => {
@@ -903,18 +962,23 @@ export default function App() {
             >
               <button
                 className="conversation-button"
-                title={c.title}
+                title={conversationLabel(c)}
                 onClick={() => selectConversation(c.id)}
               >
                 <MessageCircle size={15} />
-                <span>{c.title}</span>
+                <span>{conversationLabel(c)}</span>
+                {hasDraft(c) && (
+                  <span className="draft-badge" data-testid="draft-badge">
+                    草稿
+                  </span>
+                )}
                 {activeRun.current?.conversationId === c.id && (
                   <span className="generating-dot" />
                 )}
               </button>
               <button
                 className="conversation-more icon-button"
-                aria-label={`管理对话：${c.title}`}
+                aria-label={`管理对话：${conversationLabel(c)}`}
                 onClick={() => setMenuId(menuId === c.id ? null : c.id)}
               >
                 <MoreHorizontal size={17} />
@@ -1319,7 +1383,7 @@ export default function App() {
                 composing.current = false;
               }}
               rows={2}
-              maxLength={16_001}
+              maxLength={16_000}
             />
             <div className="composer-toolbar">
               <div className="composer-options">

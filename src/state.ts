@@ -20,6 +20,7 @@ export interface Conversation {
   title: string;
   messages: Message[];
   updatedAt: number;
+  draft?: { text: string; sources: KnowledgeItem[] };
   branchFrom?: {
     conversationId: string;
     messageId: string;
@@ -279,13 +280,41 @@ export function restoreState(): SavedState {
         });
       }
       const branch = branchSchema.safeParse(candidate.branchFrom);
-      if (candidate.branchFrom !== undefined && !branch.success) repaired = true;
+      if (candidate.branchFrom !== undefined && !branch.success)
+        repaired = true;
+      let draft: Conversation["draft"];
+      if (candidate.draft !== undefined) {
+        if (
+          !record(candidate.draft) ||
+          typeof candidate.draft.text !== "string"
+        ) {
+          repaired = true;
+        } else {
+          const sources: KnowledgeItem[] = [];
+          if (!Array.isArray(candidate.draft.sources)) repaired = true;
+          for (const item of (Array.isArray(candidate.draft.sources)
+            ? candidate.draft.sources
+            : []
+          ).slice(0, 3)) {
+            const result = knowledgeSchema.safeParse(item);
+            if (
+              result.success &&
+              !sources.some((source) => source.id === result.data.id)
+            )
+              sources.push(result.data);
+            else repaired = true;
+          }
+          if (candidate.draft.text.length > 16000) repaired = true;
+          draft = { text: candidate.draft.text.slice(0, 16000), sources };
+        }
+      }
       conversations.push({
         id: candidate.id,
         title: candidate.title.slice(0, 100) || "未命名对话",
         messages,
         updatedAt: safeTime(candidate.updatedAt),
         branchFrom: branch.success ? branch.data : undefined,
+        draft,
       });
     }
     if (!conversations.length)
