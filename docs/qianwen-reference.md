@@ -1,6 +1,6 @@
 # 千问手机 App 官方资料对照
 
-核对日期：2026-09-28。用途：指导本项目 PC 网页首版的三轮自查，不扩展已确认范围。
+核对日期：2026-09-28。以下保留首版三轮自查的原始对照记录；其中“本期范围”指首版，2026-09-29 用户追加范围见文末及 `AGENT.md` 第 10 节。
 
 ## 证据与观察边界
 
@@ -70,3 +70,15 @@
 [shot4]: https://is1-ssl.mzstatic.com/image/thumb/PurpleSource221/v4/73/71/25/737125db-62da-ffa8-fdad-339ea803c671/iOS6.5-1242x2688-4.jpg/600x1300bb-60.jpg
 [shot5]: https://is1-ssl.mzstatic.com/image/thumb/PurpleSource221/v4/23/bc/44/23bc443b-358f-4964-c0fe-a5c2a7188e98/iOS6.5-1242x2688-5.jpg/600x1300bb-60.jpg
 [shot6]: https://is1-ssl.mzstatic.com/image/thumb/PurpleSource211/v4/2d/9c/5d/2d9c5dc9-904c-8671-bdc4-4dfe328e8d6e/iOS6.5-1242x2688-6.jpg/600x1300bb-60.jpg
+
+## 2026-09-29 追加范围的实施依据
+
+本次根据用户明确要求增加语音、图片、文件、联网及账号同步。接口采用阿里云官方模型文档核对，并通过实际 Key 调用验证；没有新增手机 App 实机测试。
+
+- [视觉理解](https://help.aliyun.com/zh/model-studio/vision)：服务端将上传的实际图片交给视觉模型。
+- [录音文件识别](https://help.aliyun.com/zh/model-studio/non-realtime-speech-recognition-user-guide)与[语音合成](https://help.aliyun.com/zh/model-studio/realtime-tts-user-guide)：实现录音后转写、分段合成播放与取消；未实现双向实时通话。
+- [联网搜索](https://help.aliyun.com/zh/model-studio/web-search/)：采用原生 DashScope 接口取得检索来源，再呈现来源列表。图片与联网同时开启时，先取得网页证据，再由视觉模型结合图片回答。
+- 文档通过本地 PDF / DOCX / UTF-8 文本解析进入模型上下文，不等同于千问完整的文件工作台或在线编辑能力。
+- 按用户选择，账号同步先提供本地服务、按账号隔离和手动版本同步。未部署云端，也未验证手机千问的内部同步实现。
+
+继续保留的差异：手机拍照流程、实时语音通话、扫描文件 OCR、视频生成、品牌服务、定时任务及成熟账号管理。当前交付仍为 PC 布局网页。

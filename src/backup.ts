@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { createSnapshot, type Conversation, type SavedState } from "./state";
 import { serializeSources } from "./history";
+import { attachmentsSchema, searchSourceSchema } from "../shared/schemas";
+import { attachmentMetadata, sourceMetadata } from "./multimodal";
 
 export const BACKUP_FORMAT = "qianwen-chat-backup";
 export const MAX_BACKUP_BYTES = 10 * 1024 * 1024;
@@ -76,6 +78,8 @@ const message = z
     reasoning: z.string().max(120_000).optional(),
     error: z.string().max(2000).optional(),
     sources: sources.optional(),
+    attachments: attachmentsSchema.optional(),
+    searchSources: z.array(searchSourceSchema).max(20).optional(),
     tools: z
       .array(tool)
       .max(16)
@@ -114,7 +118,11 @@ const conversation = z
         "会话需要从用户提问开始",
       ),
     draft: z
-      .object({ text: z.string().max(16_000), sources })
+      .object({
+        text: z.string().max(16_000),
+        sources,
+        attachments: attachmentsSchema.optional(),
+      })
       .strict()
       .optional(),
     branchFrom: z
@@ -170,6 +178,8 @@ export function serializeBackup(state: SavedState, now = new Date()): string {
       createdAt: entry.createdAt,
       reasoning: entry.reasoning,
       error: entry.error,
+      attachments: entry.attachments?.map(attachmentMetadata),
+      searchSources: entry.searchSources?.map(sourceMetadata),
       sources: entry.sources?.map((source) => ({
         id: source.id,
         title: source.title,
@@ -211,6 +221,7 @@ export function serializeBackup(state: SavedState, now = new Date()): string {
     draft: item.draft
       ? {
           text: item.draft.text,
+          attachments: item.draft.attachments?.map(attachmentMetadata),
           sources: item.draft.sources.map((source) => ({
             id: source.id,
             title: source.title,

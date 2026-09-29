@@ -4,6 +4,8 @@ import type { ChatRequest, StreamEvent } from '../shared/types';
 
 const base = process.env.LOCAL_APP_URL || 'http://127.0.0.1:3001';
 const report: { scenario: string; ok: boolean; detail: string; durationMs: number }[] = [];
+const session = await fetch(`${base}/api/account/session`);
+const cookie = session.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
 
 async function check(scenario: string, prompt: string, validate: (events: StreamEvent[]) => string, stopEarly = false) {
   const started = Date.now();
@@ -15,7 +17,7 @@ async function check(scenario: string, prompt: string, validate: (events: Stream
   };
   const events: StreamEvent[] = [];
   try {
-    const response = await fetch(`${base}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), signal: controller.signal });
+    const response = await fetch(`${base}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify(request), signal: controller.signal });
     if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
     for await (const data of readSSE(response.body, controller.signal)) {
       const event = JSON.parse(data) as StreamEvent;
@@ -23,7 +25,7 @@ async function check(scenario: string, prompt: string, validate: (events: Stream
       events.push(event);
       if (event.type === 'error') throw new Error(event.error);
       if (stopEarly && event.type === 'text-delta') {
-        const cancellation = await fetch(`${base}/api/runs/${request.runId}/cancel`, { method: 'POST', signal: AbortSignal.timeout(5000) });
+        const cancellation = await fetch(`${base}/api/runs/${request.runId}/cancel`, { method: 'POST', headers: { Cookie: cookie }, signal: AbortSignal.timeout(5000) });
         if (!cancellation.ok) throw new Error(`取消接口 HTTP ${cancellation.status}`);
         if (!(await cancellation.json()).cancelled) throw new Error('取消时任务已不在运行，未覆盖生成中取消');
         controller.abort();

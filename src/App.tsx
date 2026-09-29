@@ -1,14 +1,11 @@
 import {
-  Children,
-  isValidElement,
-  memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
-  type ReactNode,
 } from "react";
 import {
   ArrowDown,
@@ -22,6 +19,7 @@ import {
   Code2,
   Copy,
   FileText,
+  Globe2,
   Menu,
   MessageCircle,
   MoreHorizontal,
@@ -35,10 +33,9 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type {
   ChatRequest,
+  Attachment,
   HealthResponse,
   KnowledgeItem,
   StreamEvent,
@@ -52,11 +49,23 @@ import {
   type Conversation,
   type Message,
   type SavedState,
+  type ComposerDraft,
 } from "./state";
 import ToolCard, { copyText } from "./ToolCard";
+import Markdown from "./MessageMarkdown";
+import AttachmentComposer from "./AttachmentComposer";
+import MessageAttachments from "./MessageAttachments";
+import VoiceControls from "./VoiceControls";
+import SearchSources from "./SearchSources";
+import SpeechButton from "./SpeechButton";
+import { useSpeechPlayback } from "./useSpeechPlayback";
+import { apiFetch, setActiveAccount } from "./api";
+import { attachmentMetadata } from "./multimodal";
+import { searchSourceSchema } from "../shared/schemas";
 import { prepareHistory, serializeSources } from "./history";
 import ReadingPreferences from "./ReadingPreferences";
 import BackupControls from "./BackupControls";
+import AccountPanel from "./AccountPanel";
 import { createBranch, findBranchPoint, type BranchMode } from "./branches";
 import {
   BranchBanner,
@@ -76,6 +85,7 @@ interface BranchRequest {
   messageId: string;
   mode: BranchMode;
   sources: KnowledgeItem[];
+  attachments?: Attachment[];
 }
 interface EditingSession {
   conversationId: string;
@@ -83,6 +93,7 @@ interface EditingSession {
   title: string;
   text: string;
   sources: KnowledgeItem[];
+  attachments?: Attachment[];
 }
 type Modal =
   | { type: "rename" | "delete"; conversation: Conversation }
@@ -130,73 +141,11 @@ function Brand({ small = false }: { small?: boolean }) {
   );
 }
 
-function CodeBlock({
-  children,
-  onToast,
-}: {
-  children: ReactNode;
-  onToast: (text: string) => void;
-}) {
-  const child = Children.toArray(children).find((node) =>
-    isValidElement<{ className?: string; children?: ReactNode }>(node),
-  );
-  const code = isValidElement<{ className?: string; children?: ReactNode }>(
-    child,
-  )
-    ? child
-    : null;
-  const language =
-    /language-([\w+-]+)/.exec(code?.props.className || "")?.[1] || "代码";
-  const content =
-    typeof code?.props.children === "string"
-      ? code.props.children.replace(/\n$/, "")
-      : "";
-  return (
-    <div className="code-block">
-      <div className="code-toolbar">
-        <span>{language}</span>
-        <button
-          aria-label="复制代码"
-          onClick={() => void copyText(content, onToast)}
-        >
-          <Copy size={14} />
-          复制代码
-        </button>
-      </div>
-      <pre>{children}</pre>
-    </div>
-  );
-}
-
-const Markdown = memo(function Markdown({
-  content,
-  onToast,
-}: {
-  content: string;
-  onToast: (text: string) => void;
-}) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        a: ({ children, ...props }) => (
-          <a {...props} target="_blank" rel="noopener noreferrer">
-            {children}
-          </a>
-        ),
-        pre: ({ children }) => (
-          <CodeBlock onToast={onToast}>{children}</CodeBlock>
-        ),
-      }}
-    >
-      {content}
-    </ReactMarkdown>
-  );
-});
-
 function hasDraft(conversation: Conversation) {
   return Boolean(
-    conversation.draft?.text.length || conversation.draft?.sources.length,
+    conversation.draft?.text.length ||
+    conversation.draft?.sources.length ||
+    conversation.draft?.attachments?.length,
   );
 }
 
@@ -206,6 +155,7 @@ function conversationLabel(conversation: Conversation) {
   return (
     conversation.draft?.text.trim().slice(0, 22) ||
     conversation.draft?.sources[0]?.title ||
+    conversation.draft?.attachments?.[0]?.name ||
     conversation.title
   );
 }
@@ -213,6 +163,14 @@ function conversationLabel(conversation: Conversation) {
 export default function App() {
   const [saved, setSaved] = useState<SavedState>(restoreState);
   const stateRef = useRef(saved);
+  const [identity, setIdentity] = useState<string | null | undefined>(
+    undefined,
+  );
+  const identityRef = useRef<string | null | undefined>(undefined);
+  const storageKey = useRef(STORAGE_KEY);
+  const workspaceCache = useRef(new Map<string, SavedState>());
+  const [composerEpoch, setComposerEpoch] = useState(0);
+  const identityReady = identity !== undefined;
   const [editing, setEditing] = useState<EditingSession | null>(null);
   const conversation = saved.conversations.find(
     (c) => c.id === saved.activeId,
@@ -225,6 +183,12 @@ export default function App() {
     editing?.conversationId === saved.activeId
       ? editing.sources
       : conversation.draft?.sources || [];
+  const selectedAttachments =
+    editing?.conversationId === saved.activeId
+      ? editing.attachments || []
+      : conversation.draft?.attachments || [];
+  const [uploading, setUploading] = useState(false);
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState(false);
   const [healthChecking, setHealthChecking] = useState(true);
@@ -239,6 +203,7 @@ export default function App() {
   const [historySearch, setHistorySearch] = useState("");
   const activeRun = useRef<ActiveRun | null>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const focusComposerAfterRender = useRef(false);
   const scrollArea = useRef<HTMLDivElement>(null);
   const followScroll = useRef(true);
   const composing = useRef(false);
@@ -246,6 +211,19 @@ export default function App() {
   const healthRequest = useRef<AbortController | null>(null);
   const modalElement = useRef<HTMLDivElement>(null);
   const modalReturnFocus = useRef<HTMLElement | null>(null);
+  const speech = useSpeechPlayback(
+    `${identity}:${saved.activeId}:${composerEpoch}`,
+    setToast,
+  );
+  const composerScope = `${identity}:${saved.activeId}:${editing?.messageId || "draft"}:${composerEpoch}`;
+  const composerScopeRef = useRef(composerScope);
+  composerScopeRef.current = composerScope;
+  useLayoutEffect(() => {
+    if (focusComposerAfterRender.current && textarea.current) {
+      focusComposerAfterRender.current = false;
+      textarea.current.focus();
+    }
+  });
 
   const update = useCallback((fn: (state: SavedState) => SavedState) => {
     const next = fn(stateRef.current);
@@ -253,18 +231,17 @@ export default function App() {
     setSaved(next);
   }, []);
 
-  function updateComposer(
-    transform: (value: { text: string; sources: KnowledgeItem[] }) => {
-      text: string;
-      sources: KnowledgeItem[];
-    },
-  ) {
+  function updateComposer(transform: (value: ComposerDraft) => ComposerDraft) {
     if (editing?.conversationId === stateRef.current.activeId) {
       setEditing((current) =>
         current
           ? {
               ...current,
-              ...transform({ text: current.text, sources: current.sources }),
+              ...transform({
+                text: current.text,
+                sources: current.sources,
+                attachments: current.attachments,
+              }),
             }
           : current,
       );
@@ -297,6 +274,27 @@ export default function App() {
       ...current,
       sources: typeof value === "function" ? value(current.sources) : value,
     }));
+  }
+  function addAttachment(attachment: Attachment) {
+    updateComposer((current) => ({
+      ...current,
+      attachments: [
+        ...(current.attachments || []),
+        attachmentMetadata(attachment),
+      ].slice(0, 4),
+    }));
+  }
+  function removeAttachment(id: string) {
+    updateComposer((current) => ({
+      ...current,
+      attachments: current.attachments?.filter((item) => item.id !== id),
+    }));
+  }
+  function appendTranscript(text: string) {
+    if (draft.length + text.length + (draft ? 1 : 0) > 16_000)
+      throw new Error("转写后内容超过 16,000 字，请先缩短输入框中的文字。");
+    setDraft((value) => (value ? `${value}\n${text}` : text));
+    textarea.current?.focus();
   }
   const updateMessage = useCallback(
     (
@@ -430,12 +428,12 @@ export default function App() {
   }, [modal]);
   useEffect(() => {
     if (persistTimer.current) clearTimeout(persistTimer.current);
+    if (!identityReady) return;
+    const key = storageKey.current;
     persistTimer.current = setTimeout(() => {
+      if (key !== storageKey.current) return;
       try {
-        localStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify(createSnapshot(saved)),
-        );
+        localStorage.setItem(key, JSON.stringify(createSnapshot(saved)));
         setStorageError(false);
       } catch {
         setStorageError(true);
@@ -444,12 +442,13 @@ export default function App() {
     return () => {
       if (persistTimer.current) clearTimeout(persistTimer.current);
     };
-  }, [saved]);
+  }, [saved, identityReady, identity]);
   useEffect(() => {
     const save = () => {
+      if (identityRef.current === undefined) return;
       try {
         localStorage.setItem(
-          STORAGE_KEY,
+          storageKey.current,
           JSON.stringify(createSnapshot(stateRef.current)),
         );
       } catch {
@@ -499,7 +498,7 @@ export default function App() {
     activeRun.current = null;
     setActiveRunId(null);
     run.controller.abort();
-    void fetch(`/api/runs/${encodeURIComponent(run.id)}/cancel`, {
+    void apiFetch(`/api/runs/${encodeURIComponent(run.id)}/cancel`, {
       method: "POST",
     }).catch(() => undefined);
     updateMessage(run.conversationId, run.messageId, (m) => ({
@@ -518,8 +517,80 @@ export default function App() {
       textarea.current?.focus();
   }, [updateMessage]);
 
+  function resetWorkspaceControls() {
+    speech.stop();
+    composerScopeRef.current = "switching";
+    setComposerEpoch((value) => value + 1);
+    setEditing(null);
+    setUploading(false);
+    setVoiceBusy(false);
+    setHistorySearch("");
+    setMenuId(null);
+    setModal(null);
+    followScroll.current = true;
+    setShowLatest(false);
+  }
+
+  function acceptIdentity(nextId: string | null) {
+    if (identityRef.current === nextId) return;
+    stop();
+    resetWorkspaceControls();
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    // Keep an in-memory copy even when browser storage is full.
+    workspaceCache.current.set(storageKey.current, stateRef.current);
+    if (identityRef.current !== undefined) {
+      try {
+        localStorage.setItem(
+          storageKey.current,
+          JSON.stringify(createSnapshot(stateRef.current)),
+        );
+      } catch {
+        setToast(
+          "浏览器存储空间不足；原工作区仍保留在当前页面，请及时导出备份。",
+        );
+      }
+    }
+    const nextKey = nextId ? `${STORAGE_KEY}:user:${nextId}` : STORAGE_KEY;
+    const next = workspaceCache.current.get(nextKey) || restoreState(nextKey);
+    storageKey.current = nextKey;
+    identityRef.current = nextId;
+    setActiveAccount(nextId);
+    update(() => next);
+    setIdentity(nextId);
+    setStorageError(false);
+  }
+
+  function applyWorkspace(next: SavedState) {
+    if (!identityReady || activeRun.current || uploading || voiceBusy)
+      throw new Error("请等待当前生成、上传或语音输入结束后再导入。");
+    const snapshot = JSON.stringify(createSnapshot(next));
+    if (snapshot.length > 6_000_000)
+      throw new Error(
+        "合并后的工作区超出本机存储容量，请先导出并删除部分对话。",
+      );
+    try {
+      localStorage.setItem(storageKey.current, snapshot);
+    } catch {
+      throw new Error(
+        "浏览器空间不足，未导入任何会话。请清理浏览器存储后重试。",
+      );
+    }
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    resetWorkspaceControls();
+    workspaceCache.current.set(storageKey.current, next);
+    update(() => next);
+    setStorageError(false);
+  }
+
   async function send(text = draft, branchRequest?: BranchRequest) {
-    const content = text.trim();
+    if (!identityReady) return;
+    if (uploading || voiceBusy) {
+      setToast("请等待附件上传或语音输入完成后再发送。");
+      return;
+    }
+    const attachments = branchRequest?.attachments ?? selectedAttachments;
+    const content =
+      text.trim() || (attachments.length ? "请分析这些附件。" : "");
     if (!content) return;
     const sourceItems = branchRequest?.sources ?? selectedSources;
     const branchIntent =
@@ -571,21 +642,38 @@ export default function App() {
       status: "done",
       createdAt: Date.now(),
       sources: sourceItems.length ? structuredClone(sourceItems) : undefined,
+      attachments: attachments.length
+        ? attachments.map(attachmentMetadata)
+        : undefined,
     };
     let messages: ChatRequest["messages"];
     try {
       messages = prepareHistory(
         [...current.messages, user]
-          .filter((message) => message.content || message.tools?.length)
-          .map(({ role, content: messageContent, tools, sources }) => ({
-            role,
-            content: serializeSources(messageContent, sources),
-            tools: tools?.map((tool) =>
-              ["receiving", "queued", "running"].includes(tool.status)
-                ? { ...tool, status: "cancelled" as const }
-                : tool,
-            ),
-          })),
+          .filter(
+            (message) =>
+              message.content ||
+              message.tools?.length ||
+              message.attachments?.length,
+          )
+          .map(
+            ({
+              role,
+              content: messageContent,
+              tools,
+              sources,
+              attachments: files,
+            }) => ({
+              role,
+              content: serializeSources(messageContent, sources),
+              attachments: files?.map(attachmentMetadata),
+              tools: tools?.map((tool) =>
+                ["receiving", "queued", "running"].includes(tool.status)
+                  ? { ...tool, status: "cancelled" as const }
+                  : tool,
+              ),
+            }),
+          ),
       );
     } catch (error) {
       setToast(
@@ -596,6 +684,7 @@ export default function App() {
       return;
     }
     stop();
+    speech.stop();
     const assistant: Message = {
       id: crypto.randomUUID(),
       role: "assistant",
@@ -642,7 +731,7 @@ export default function App() {
     if (branchIntent) setHistorySearch("");
     followScroll.current = true;
     setShowLatest(false);
-    textarea.current?.focus();
+    focusComposerAfterRender.current = true;
     const body: ChatRequest = {
       runId: run.id,
       conversationId: current.id,
@@ -650,10 +739,11 @@ export default function App() {
       messages,
       useTools: state.useTools,
       thinking: state.thinking,
+      webSearch: state.webSearch === true,
     };
     let completed = false;
     try {
-      const response = await fetch("/api/chat", {
+      const response = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -691,6 +781,14 @@ export default function App() {
           break;
         }
         updateMessage(current.id, assistant.id, (m) => {
+          if (event.type === "sources")
+            return {
+              ...m,
+              searchSources: event.sources.slice(0, 20).flatMap((source) => {
+                const result = searchSourceSchema.safeParse(source);
+                return result.success ? [result.data] : [];
+              }),
+            };
           if (event.type === "text-delta")
             return { ...m, content: m.content + event.delta };
           if (event.type === "reasoning-delta")
@@ -732,19 +830,22 @@ export default function App() {
   }
 
   function beginEditing(messageId: string) {
-    if (activeRun.current || editing) return;
+    if (activeRun.current || editing || uploading || voiceBusy) return;
     const current = stateRef.current.conversations.find(
       (c) => c.id === stateRef.current.activeId,
     );
     if (!current) return;
     try {
       const { question } = findBranchPoint(current, messageId);
+      composerScopeRef.current = "switching";
+      focusComposerAfterRender.current = true;
       setEditing({
         conversationId: current.id,
         messageId: question.id,
         title: current.title,
         text: question.content,
         sources: question.sources || [],
+        attachments: question.attachments || [],
       });
       textarea.current?.focus();
     } catch (error) {
@@ -754,12 +855,14 @@ export default function App() {
 
   function cancelEditing() {
     if (!editing) return;
+    composerScopeRef.current = "switching";
+    focusComposerAfterRender.current = true;
     setEditing(null);
     textarea.current?.focus();
   }
 
   function regenerate(messageId: string) {
-    if (activeRun.current || editing) return;
+    if (activeRun.current || editing || uploading || voiceBusy) return;
     const current = stateRef.current.conversations.find(
       (c) => c.id === stateRef.current.activeId,
     );
@@ -771,6 +874,7 @@ export default function App() {
         messageId: question.id,
         mode: "regenerate",
         sources: question.sources || [],
+        attachments: question.attachments || [],
       });
     } catch (error) {
       setToast(
@@ -780,6 +884,13 @@ export default function App() {
   }
 
   const newConversation = useCallback(() => {
+    composerScopeRef.current = "switching";
+    // Empty conversations can be reused; uploads and recordings still belong
+    // to the previous composer and must be disposed on every new-chat action.
+    setComposerEpoch((value) => value + 1);
+    setUploading(false);
+    setVoiceBusy(false);
+    focusComposerAfterRender.current = true;
     const empty = stateRef.current.conversations.find(
       (c) => c.messages.length === 0 && !hasDraft(c),
     );
@@ -798,7 +909,13 @@ export default function App() {
   }, [update]);
   useEffect(() => {
     const handleShortcut = (event: globalThis.KeyboardEvent) => {
-      if (event.isComposing || composing.current || event.repeat) return;
+      if (
+        !identityReady ||
+        event.isComposing ||
+        composing.current ||
+        event.repeat
+      )
+        return;
       if (event.key === "Escape") {
         if (modal) setModal(null);
         else if (menuId) setMenuId(null);
@@ -821,8 +938,9 @@ export default function App() {
     };
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [newConversation, stop, modal, menuId]);
+  }, [newConversation, stop, modal, menuId, identityReady]);
   function selectConversation(id: string) {
+    composerScopeRef.current = "switching";
     update((s) => ({ ...s, activeId: id }));
     setEditing(null);
     followScroll.current = true;
@@ -902,7 +1020,11 @@ export default function App() {
 
   return (
     <div className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
-      <aside className="sidebar" aria-label="会话侧边栏" inert={!!modal}>
+      <aside
+        className="sidebar"
+        aria-label="会话侧边栏"
+        inert={!!modal || !identityReady}
+      >
         <div className="sidebar-brand">
           <Brand small />
           <span>
@@ -1019,37 +1141,25 @@ export default function App() {
           )}
         </nav>
         <div className="sidebar-bottom">
+          <AccountPanel
+            getState={() => stateRef.current}
+            onApply={applyWorkspace}
+            onIdentityChange={acceptIdentity}
+            disabled={!identityReady || !!activeRunId || uploading || voiceBusy}
+            onToast={setToast}
+          />
           <BackupControls
             getState={() => stateRef.current}
-            disabled={!!activeRunId}
+            disabled={!identityReady || !!activeRunId || uploading || voiceBusy}
             onToast={setToast}
-            onImport={(next) => {
-              if (activeRun.current)
-                throw new Error("请等待当前生成结束后再导入备份。");
-              try {
-                localStorage.setItem(
-                  STORAGE_KEY,
-                  JSON.stringify(createSnapshot(next)),
-                );
-              } catch {
-                throw new Error(
-                  "浏览器空间不足，未导入任何会话。请清理浏览器存储后重试。",
-                );
-              }
-              if (persistTimer.current) clearTimeout(persistTimer.current);
-              update(() => next);
-              setEditing(null);
-              setHistorySearch("");
-              setMenuId(null);
-              setStorageError(false);
-              followScroll.current = true;
-              setShowLatest(false);
-            }}
+            onImport={applyWorkspace}
           />
           <ReadingPreferences />
           <div className="local-note">
             <span className="local-dot" />
-            会话仅保存在本机
+            {identity
+              ? "本机自动保存 · 账户手动同步"
+              : "访客工作区 · 本机自动保存"}
           </div>
           <button
             className="profile-button"
@@ -1064,7 +1174,7 @@ export default function App() {
           </button>
         </div>
       </aside>
-      <main className="main-panel" inert={!!modal}>
+      <main className="main-panel" inert={!!modal || !identityReady}>
         <header className="topbar">
           <div className="topbar-left">
             {!sidebarOpen && (
@@ -1200,6 +1310,7 @@ export default function App() {
                   <article className="user-message" key={message.id}>
                     <div>
                       {message.content}
+                      <MessageAttachments attachments={message.attachments} />
                       {message.sources?.map((source) => (
                         <details
                           key={source.id}
@@ -1219,7 +1330,9 @@ export default function App() {
                       ))}
                     </div>
                     <EditMessageButton
-                      disabled={!!activeRunId || !!editing}
+                      disabled={
+                        !!activeRunId || !!editing || uploading || voiceBusy
+                      }
                       onClick={() => beginEditing(message.id)}
                     />
                   </article>
@@ -1274,6 +1387,7 @@ export default function App() {
                           />
                         </div>
                       )}
+                      <SearchSources sources={message.searchSources} />
                       {message.status === "streaming" &&
                         !message.content &&
                         !message.tools?.length && (
@@ -1314,9 +1428,25 @@ export default function App() {
                               <Copy size={15} />
                             </button>
                           )}
+                          {message.content && (
+                            <SpeechButton
+                              messageId={message.id}
+                              state={speech.state}
+                              onPlay={() =>
+                                void speech.play(message.id, message.content)
+                              }
+                              onStop={speech.stop}
+                              disabled={!!activeRunId || !health?.configured}
+                            />
+                          )}
                           <RegenerateButton
                             failed={message.status === "error"}
-                            disabled={!!activeRunId || !!editing}
+                            disabled={
+                              !!activeRunId ||
+                              !!editing ||
+                              uploading ||
+                              voiceBusy
+                            }
                             onClick={() => regenerate(message.id)}
                           />
                         </div>
@@ -1388,90 +1518,140 @@ export default function App() {
                 ))}
               </div>
             )}
-            <textarea
-              ref={textarea}
-              data-testid="message-input"
-              aria-label="消息输入框"
-              title="聚焦输入：Ctrl / ⌘ + /"
-              placeholder={
-                currentGenerating
-                  ? "输入新问题，发送后将打断当前回答…"
-                  : "尽管问，交给我来想办法"
+            <AttachmentComposer
+              key={composerScope}
+              value={selectedAttachments}
+              onAdd={(item) => {
+                if (composerScopeRef.current === composerScope)
+                  addAttachment(item);
+              }}
+              onRemove={removeAttachment}
+              onBusyChange={setUploading}
+              disabled={
+                !identityReady ||
+                !!activeRunId ||
+                health?.capabilities?.uploads === false
               }
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={handleKey}
-              onCompositionStart={() => {
-                composing.current = true;
-              }}
-              onCompositionEnd={() => {
-                composing.current = false;
-              }}
-              rows={2}
-              maxLength={16_000}
-            />
-            <div className="composer-toolbar">
-              <div className="composer-options">
-                <button
-                  type="button"
-                  className={`option-chip ${saved.thinking ? "active" : ""}`}
-                  aria-pressed={saved.thinking}
-                  onClick={() =>
-                    update((s) => ({ ...s, thinking: !s.thinking }))
+              extraControls={
+                <VoiceControls
+                  disabled={
+                    !identityReady || !!activeRunId || !health?.configured
                   }
-                >
-                  <BrainCircuit size={16} />
-                  深度思考
-                </button>
-                <button
-                  type="button"
-                  className={`option-chip ${saved.useTools ? "active" : ""}`}
-                  aria-pressed={saved.useTools}
-                  onClick={() =>
-                    update((s) => ({ ...s, useTools: !s.useTools }))
-                  }
-                >
-                  <Wrench size={15} />
-                  工具<span className="chip-count">2</span>
-                </button>
-              </div>
-              <div className="send-controls">
-                {currentGenerating && (
+                  onTranscript={(text) => {
+                    if (composerScopeRef.current === composerScope)
+                      appendTranscript(text);
+                  }}
+                  onBusyChange={setVoiceBusy}
+                />
+              }
+            >
+              <textarea
+                ref={textarea}
+                data-testid="message-input"
+                aria-label="消息输入框"
+                title="聚焦输入：Ctrl / ⌘ + /"
+                placeholder={
+                  currentGenerating
+                    ? "输入新问题，发送后将打断当前回答…"
+                    : "尽管问，交给我来想办法"
+                }
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={handleKey}
+                onCompositionStart={() => {
+                  composing.current = true;
+                }}
+                onCompositionEnd={() => {
+                  composing.current = false;
+                }}
+                rows={2}
+                maxLength={16_000}
+              />
+              <div className="composer-toolbar">
+                <div className="composer-options">
                   <button
                     type="button"
-                    data-testid="stop-button"
-                    className="stop-button"
-                    aria-label="停止生成"
-                    title="停止生成（Esc）"
-                    onClick={stop}
+                    className={`option-chip ${saved.webSearch ? "active" : ""}`}
+                    aria-pressed={saved.webSearch === true}
+                    aria-label="联网搜索"
+                    disabled={health?.capabilities?.webSearch === false}
+                    onClick={() =>
+                      update((state) => ({
+                        ...state,
+                        webSearch: !state.webSearch,
+                      }))
+                    }
                   >
-                    <Square size={13} fill="currentColor" />
+                    <Globe2 size={15} />
+                    联网搜索
                   </button>
-                )}
-                <button
-                  type="submit"
-                  data-testid="send-button"
-                  className="send-button"
-                  aria-label={
-                    editing
-                      ? "发送编辑后的问题"
-                      : currentGenerating
-                        ? "打断并发送消息"
-                        : "发送消息"
-                  }
-                  title={
-                    editing
-                      ? "在新分支中发送"
-                      : currentGenerating
-                        ? "打断并发送"
-                        : "发送消息"
-                  }
-                  disabled={!draft.trim() || (!!editing && !!activeRunId)}
-                >
-                  <ArrowUp size={21} strokeWidth={2.4} />
-                </button>
+                  <button
+                    type="button"
+                    className={`option-chip ${saved.thinking ? "active" : ""}`}
+                    aria-pressed={saved.thinking}
+                    onClick={() =>
+                      update((s) => ({ ...s, thinking: !s.thinking }))
+                    }
+                  >
+                    <BrainCircuit size={16} />
+                    深度思考
+                  </button>
+                  <button
+                    type="button"
+                    className={`option-chip ${saved.useTools ? "active" : ""}`}
+                    aria-pressed={saved.useTools}
+                    onClick={() =>
+                      update((s) => ({ ...s, useTools: !s.useTools }))
+                    }
+                  >
+                    <Wrench size={15} />
+                    工具<span className="chip-count">2</span>
+                  </button>
+                </div>
+                <div className="send-controls">
+                  {currentGenerating && (
+                    <button
+                      type="button"
+                      data-testid="stop-button"
+                      className="stop-button"
+                      aria-label="停止生成"
+                      title="停止生成（Esc）"
+                      onClick={stop}
+                    >
+                      <Square size={13} fill="currentColor" />
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    data-testid="send-button"
+                    className="send-button"
+                    aria-label={
+                      editing
+                        ? "发送编辑后的问题"
+                        : currentGenerating
+                          ? "打断并发送消息"
+                          : "发送消息"
+                    }
+                    title={
+                      editing
+                        ? "在新分支中发送"
+                        : currentGenerating
+                          ? "打断并发送"
+                          : "发送消息"
+                    }
+                    disabled={
+                      !identityReady ||
+                      (!draft.trim() && !selectedAttachments.length) ||
+                      uploading ||
+                      voiceBusy ||
+                      (!!editing && !!activeRunId)
+                    }
+                  >
+                    <ArrowUp size={21} strokeWidth={2.4} />
+                  </button>
+                </div>
               </div>
-            </div>
+            </AttachmentComposer>
           </form>
           <div className="composer-footer">
             <span>内容由 AI 生成，请仔细甄别</span>
@@ -1479,6 +1659,12 @@ export default function App() {
           </div>
         </div>
       </main>
+      {!identityReady && (
+        <div className="workspace-loading" role="status">
+          <Brand />
+          <span>正在打开你的工作空间…</span>
+        </div>
+      )}
       {toast && (
         <div className="toast" role="status">
           <Check size={16} />
@@ -1521,10 +1707,41 @@ export default function App() {
                     <Wrench size={16} />
                     计算器与本地资料检索
                   </span>
+                  <span>
+                    <FileText size={16} />
+                    图片与文档提问 · 语音输入和朗读
+                  </span>
+                  <span>
+                    <Globe2 size={16} />
+                    联网搜索与来源 · 账户手动同步
+                  </span>
                 </div>
+                {health?.capabilities && (
+                  <dl className="capability-info">
+                    <div>
+                      <dt>图片理解模型</dt>
+                      <dd>{health.capabilities.visionModel}</dd>
+                    </div>
+                    <div>
+                      <dt>语音转写模型</dt>
+                      <dd>{health.capabilities.asrModel}</dd>
+                    </div>
+                    <div>
+                      <dt>语音合成模型</dt>
+                      <dd>{health.capabilities.ttsModel}</dd>
+                    </div>
+                    <div>
+                      <dt>服务配置</dt>
+                      <dd>
+                        {health.configured
+                          ? "已配置千问凭证，实际可用性以请求结果为准"
+                          : "尚未配置千问凭证"}
+                      </dd>
+                    </div>
+                  </dl>
+                )}
                 <p className="about-note">
-                  独立面试演示项目。聊天记录存于当前浏览器；模型请求会发送至千问
-                  API。资料检索使用项目自带的演示文档。
+                  独立面试演示项目。会话在当前浏览器自动保存，登录后可手动同步到账户；附件保存在当前服务。发送问题、图片、文档或语音时，对应内容会交给千问处理。本地资料检索使用项目自带的演示文档。
                 </p>
                 <button
                   className="primary-button"

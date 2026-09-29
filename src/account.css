@@ -1,0 +1,185 @@
+.account-control {
+  position: relative;
+}
+.account-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--reading-secondary, #625e73);
+  font-size: 13px;
+}
+.account-trigger::-webkit-details-marker {
+  display: none;
+}
+.account-trigger > span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.account-trigger:hover,
+.account-control[open] .account-trigger {
+  background: var(--reading-soft, #efecff);
+  color: var(--reading-accent-text, #5949ce);
+}
+.account-panel {
+  position: absolute;
+  left: 0;
+  z-index: 45;
+  width: min(400px, calc(100vw - 36px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  border: 1px solid var(--reading-border, #d9d8e4);
+  border-radius: 14px;
+  background: var(--reading-surface, #fff);
+  color: var(--reading-text, #2d2b3b);
+  box-shadow: 0 12px 35px #0003;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.account-above {
+  bottom: calc(100% + 8px);
+}
+.account-below {
+  top: calc(100% + 8px);
+}
+.account-panel button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--reading-border, #d9d8e4);
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--reading-surface-muted, #f6f6fa);
+  color: var(--reading-text, #2d2b3b);
+  font: inherit;
+  cursor: pointer;
+}
+.account-panel button:hover:not(:disabled) {
+  background: var(--reading-soft, #efecff);
+}
+.account-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.account-panel .account-primary {
+  background: var(--reading-accent, #5949ce);
+  color: #fff;
+  border-color: transparent;
+}
+.account-panel .account-primary:hover:not(:disabled) {
+  background: var(--reading-accent-hover, #4939b4);
+}
+.account-heading,
+.account-identity {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.account-heading strong {
+  font-size: 15px;
+}
+.account-heading button {
+  padding: 3px;
+  border: 0;
+  background: transparent;
+}
+.account-identity {
+  margin: 14px 0;
+  overflow-wrap: anywhere;
+}
+.account-note {
+  color: var(--reading-secondary, #625e73);
+  font-size: 12px;
+  margin: 10px 0;
+}
+.account-panel fieldset {
+  border: 0;
+  padding: 0;
+  margin: 12px 0;
+  min-width: 0;
+}
+.account-panel legend {
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: 9px;
+}
+.account-panel label:not(.account-radio) {
+  display: block;
+  margin: 9px 0 5px;
+}
+.account-panel input:not([type="radio"]) {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--reading-border, #d9d8e4);
+  border-radius: 8px;
+  padding: 9px;
+  background: var(--reading-bg, #fff);
+  color: var(--reading-text, #2d2b3b);
+  font: inherit;
+}
+.account-panel input::placeholder {
+  color: var(--reading-muted, #716c80);
+}
+.account-form-actions,
+.account-sync-actions,
+.account-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.account-preview {
+  border-top: 1px solid var(--reading-border, #d9d8e4);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+.account-preview dl {
+  margin: 10px 0;
+}
+.account-preview dl > div {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 6px 0;
+}
+.account-preview dd {
+  margin: 0;
+}
+.account-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 9px 0;
+}
+.account-radio input {
+  margin: 4px 0 0;
+  accent-color: var(--reading-accent, #5949ce);
+}
+.account-warning {
+  color: var(--reading-warning, #775219);
+  background: var(--reading-warning-bg, #fff6e7);
+  padding: 8px;
+  border-radius: 7px;
+}
+.account-error {
+  color: var(--reading-danger, #a33349);
+  background: var(--reading-danger-bg, #fff2f4);
+  padding: 8px;
+  border-radius: 7px;
+  overflow-wrap: anywhere;
+}
+.account-panel :is(input, button):focus-visible,
+.account-trigger:focus-visible {
+  outline: 2px solid var(--reading-focus, #8170eb);
+  outline-offset: 2px;
+}

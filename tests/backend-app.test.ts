@@ -4,12 +4,18 @@ import type { AddressInfo } from 'node:net';
 import { chatSchema, createApp, type AppOptions } from '../server/app.ts';
 
 const servers: Server[] = [];
+const clients = new Map<string, string>();
 const request = { runId: 'run', conversationId: 'conversation', messageId: 'message', messages: [{ role: 'user', content: '你好' }], useTools: true, thinking: false };
 async function serve(options: AppOptions = {}) {
-  const server = createServer(createApp({ apiKey: 'test-secret', ...options }));
+  const app = createApp({ apiKey: 'test-secret', inMemoryAccounts: true, ...options });
+  const server = createServer(app);
+  server.once('close', () => app.locals.dispose());
   servers.push(server);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const session = await fetch(`${base}/api/account/session`);
+  clients.set(base, session.headers.getSetCookie().map(cookie => cookie.split(';')[0]).join('; '));
+  return base;
 }
 afterEach(async () => { for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } });
 function cancellableProvider() {
@@ -29,7 +35,7 @@ function cancellableProvider() {
   }) as typeof fetch;
   return { fetcher, aborted, started };
 }
-const post = (url: string, body = request, signal?: AbortSignal) => fetch(`${url}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal });
+const post = (url: string, body = request, signal?: AbortSignal) => fetch(`${url}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: clients.get(url) || '' }, body: JSON.stringify(body), signal });
 
 describe('local API', () => {
   it('accepts long prior assistant answers while bounding user input', () => {
@@ -51,7 +57,7 @@ describe('local API', () => {
     const base = await serve({ fetch: provider.fetcher });
     const response = await post(base);
     await provider.started;
-    const cancelled = await fetch(`${base}/api/runs/run/cancel`, { method: 'POST' });
+    const cancelled = await fetch(`${base}/api/runs/run/cancel`, { method: 'POST', headers: { Cookie: clients.get(base) || '' } });
     expect(await cancelled.json()).toEqual({ cancelled: true });
     await expect(provider.aborted).resolves.toMatchObject({ name: 'AbortError' });
     await response.text();

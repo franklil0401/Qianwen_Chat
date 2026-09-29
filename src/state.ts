@@ -1,6 +1,9 @@
 import { z } from "zod";
+import { attachmentsSchema, searchSourceSchema } from "../shared/schemas";
 import type {
   HistoryMessage,
+  Attachment,
+  SearchSource,
   KnowledgeItem,
   ToolCall,
   ToolResult,
@@ -14,13 +17,19 @@ export interface Message extends HistoryMessage {
   error?: string;
   createdAt: number;
   sources?: KnowledgeItem[];
+  searchSources?: SearchSource[];
+}
+export interface ComposerDraft {
+  text: string;
+  sources: KnowledgeItem[];
+  attachments?: Attachment[];
 }
 export interface Conversation {
   id: string;
   title: string;
   messages: Message[];
   updatedAt: number;
-  draft?: { text: string; sources: KnowledgeItem[] };
+  draft?: ComposerDraft;
   branchFrom?: {
     conversationId: string;
     messageId: string;
@@ -34,6 +43,7 @@ export interface SavedState {
   activeId: string;
   useTools: boolean;
   thinking: boolean;
+  webSearch?: boolean;
   recoveryNotice?: string;
 }
 export const STORAGE_KEY = "qianwen-workspace-v1";
@@ -112,6 +122,7 @@ export function createSnapshot(state: SavedState): SavedState {
     activeId: active?.id ?? retained[0]?.id ?? state.activeId,
     useTools: state.useTools,
     thinking: state.thinking,
+    webSearch: state.webSearch === true,
     conversations: retained.map((conversation) => {
       let start = Math.max(0, conversation.messages.length - 100);
       while (
@@ -125,7 +136,7 @@ export function createSnapshot(state: SavedState): SavedState {
   };
 }
 
-export function restoreState(): SavedState {
+export function restoreState(storageKey = STORAGE_KEY): SavedState {
   const initial = createConversation();
   const fallback: SavedState = {
     version: 1,
@@ -139,7 +150,7 @@ export function restoreState(): SavedState {
     recoveryNotice: message,
   });
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw) return fallback;
     if (raw.length > 6_000_000)
       return failed("历史数据体积过大，已打开新对话。请检查浏览器存储空间。");
@@ -261,6 +272,28 @@ export function restoreState(): SavedState {
               ? original.status
               : "done";
         if (original.status === "streaming") interrupted = true;
+        const attachments = attachmentsSchema.safeParse(
+          original.attachments ?? [],
+        );
+        if (!attachments.success) repaired = true;
+        const searchSources: SearchSource[] = [];
+        if (
+          original.searchSources !== undefined &&
+          !Array.isArray(original.searchSources)
+        )
+          repaired = true;
+        for (const value of (Array.isArray(original.searchSources)
+          ? original.searchSources
+          : []
+        ).slice(0, 20)) {
+          const parsedSource = searchSourceSchema.safeParse(value);
+          if (
+            parsedSource.success &&
+            !searchSources.some((source) => source.id === parsedSource.data.id)
+          )
+            searchSources.push(parsedSource.data);
+          else repaired = true;
+        }
         messages.push({
           id: id as string,
           role: original.role,
@@ -268,6 +301,11 @@ export function restoreState(): SavedState {
           status,
           tools,
           sources: sources.length ? sources : undefined,
+          attachments:
+            attachments.success && attachments.data.length
+              ? attachments.data
+              : undefined,
+          searchSources: searchSources.length ? searchSources : undefined,
           reasoning:
             typeof original.reasoning === "string"
               ? original.reasoning.slice(0, 120_000)
@@ -305,7 +343,17 @@ export function restoreState(): SavedState {
             else repaired = true;
           }
           if (candidate.draft.text.length > 16000) repaired = true;
-          draft = { text: candidate.draft.text.slice(0, 16000), sources };
+          const attachments = attachmentsSchema.safeParse(
+            candidate.draft.attachments ?? [],
+          );
+          if (!attachments.success) repaired = true;
+          draft = {
+            text: candidate.draft.text.slice(0, 16000),
+            sources,
+            ...(attachments.success && attachments.data.length
+              ? { attachments: attachments.data }
+              : {}),
+          };
         }
       }
       conversations.push({
@@ -331,6 +379,7 @@ export function restoreState(): SavedState {
           : conversations[0].id,
       useTools: parsed.useTools !== false,
       thinking: parsed.thinking === true,
+      webSearch: parsed.webSearch === true,
     });
     const notes = [
       repaired ? "部分历史数据损坏，已恢复可用内容。" : "",
