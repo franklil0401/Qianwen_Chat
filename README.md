@@ -1,10 +1,14 @@
 # 千问 · 桌面助手
 
-面向 PC 浏览器的本地聊天应用。接入千问 API，支持流式输出、停止与打断、工具卡片、语音输入与朗读、图片理解、文档问答、联网搜索，以及账号和服务端会话同步。
+面向 PC 的本地聊天应用，提供网页和 Windows x64 桌面安装包。接入千问 API，支持流式输出、停止与打断、工具卡片、语音输入与朗读、图片理解、文档问答、联网搜索，以及本地账号和手动会话同步。
 
-2026-09-30 用户已授权再迭代两轮后制作 Windows 桌面安装包，当前正在按顺序推进。
+当前为 `v0.13.0`：两轮改进已分别推送，随后增加桌面运行时、独立数据目录、中文菜单、图片预览窗口和 Windows 安装程序。尚未部署云端；桌面账号同步保存在本机服务。版本验证、差距和截图见 [迭代记录](docs/iterations.md)。
 
-当前为 `v0.12.0`：本次两轮改进已完成，修复中文输入和语音结果恢复、历史网页来源追问，以及退出时语音/解析任务的取消。138 项核心测试与 43 项浏览器场景通过。接下来制作 Windows 桌面安装包，尚未部署公网服务。版本验证、差距和截图见 [迭代记录](docs/iterations.md)。
+## Windows 安装包
+
+双击项目 `release/QianwenChat-Setup-0.13.0-x64.exe` 安装，从桌面“千问桌面助手”启动。安装包内置运行时，无需安装 Node.js；模型仍读取 Windows 环境变量 `Qianwen_api_key`。本版未做代码签名。
+
+安装、配置、数据备份与复现命令见 [桌面版说明](docs/desktop.md)。桌面版和网页的数据独立，迁移会话可用 JSON 备份，原附件需重新上传。
 
 ## 本地运行
 
@@ -90,6 +94,7 @@ PC 操作：Ctrl/⌘+K 新建对话，Ctrl+/ 聚焦输入框，Esc 停止生成�
 - `src/`：React 界面、会话状态、SSE 客户端、Markdown 和工具组件。
 - `server/`：Express API、千问流式适配、工具、隔离的文档解析、附件存储、SQLite 账号和同步。
 - `shared/`：前后端事件合同及跨数据块 SSE 解码器。
+- `desktop/`：Electron 窗口、桌面访问边界、权限与服务生命周期；`electron-builder.config.cjs` 配置安装包。
 - `data/knowledge/`：随项目提供的本地演示资料。
 - `tests/`：核心协议与后端测试，以及浏览器交互测试。
 - [项目约定](AGENT.md)、[千问 App 对照依据](docs/qianwen-reference.md)、[迭代记录](docs/iterations.md)。
@@ -110,6 +115,8 @@ npm run test:e2e
 本地服务运行后，可执行 `npm run test:live` 重现真实流式、计算器、资料检索和中途取消检查。该命令会调用千问并消耗账户额度，简短结果写入不会提交的 `.local/live-check.json`。
 
 `npm run test:live:features` 检查实际图片理解、TXT/PDF/DOCX 问答、联网来源与计算器组合、语音合成再转写；同样消耗模型额度，结果写入 `.local/live-features.json`。浏览器自动测试使用虚拟麦克风验证录音与取消流程，真实设备的收音和音量请在验收时体验。
+
+桌面构建执行 `npm run desktop:dist`。`npm run test:desktop` 验证独立桌面数据、权限和文件解析；设置 `QWEN_DESKTOP_EXECUTABLE` 后可针对已安装程序测试。`npm run test:live:desktop` 使用当前配置的真实千问 API 验证已安装程序，会消耗模型额度。
 
 ## 当前范围
 

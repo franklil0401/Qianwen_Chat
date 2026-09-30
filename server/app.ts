@@ -3,6 +3,7 @@ import type { ErrorRequestHandler } from 'express';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { StreamEvent } from '../shared/types.ts';
 import { PublicError, runChat, type ProviderConfig } from './provider.ts';
@@ -18,10 +19,22 @@ const messageSchema = z.discriminatedUnion('role', [
 ]);
 export const chatSchema = z.object({ runId: idSchema, conversationId: idSchema, messageId: idSchema, messages: z.array(messageSchema).min(1).max(80), useTools: z.boolean(), thinking: z.boolean(), webSearch: z.boolean().optional() }).strict().refine(value => { const last = value.messages.at(-1); return last?.role === 'user' && Boolean(last.content.trim() || last.attachments?.length); }, { message: '最后一条消息必须是用户问题或附件' });
 
-export interface AppOptions extends Partial<ProviderConfig> { requestTimeoutMs?: number; staticDir?: string; dataDir?: string; publicOrigin?: string; inMemoryAccounts?: boolean }
+export interface AppOptions extends Partial<ProviderConfig> { requestTimeoutMs?: number; staticDir?: string; dataDir?: string; publicOrigin?: string; inMemoryAccounts?: boolean; desktopToken?: string }
 export function createApp(options: AppOptions = {}) {
   const app = express();
   app.disable('x-powered-by');
+  if (options.desktopToken !== undefined) {
+    if (!options.desktopToken) throw new Error('桌面访问令牌不能为空');
+    const expectedToken = createHash('sha256').update(options.desktopToken).digest();
+    // This precedes every route, including static files and identity middleware.
+    // Hash both values to fixed-size buffers before the constant-time comparison.
+    app.use((req, res, next) => {
+      res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
+      const receivedToken = createHash('sha256').update(req.get('X-Qianwen-Desktop-Token') ?? '').digest();
+      if (!timingSafeEqual(expectedToken, receivedToken)) { res.status(403).json({ error: '仅允许当前桌面应用访问。' }); return; }
+      next();
+    });
+  }
   const config: ProviderConfig = { apiKey: options.apiKey ?? process.env.Qianwen_api_key ?? '', model: options.model ?? process.env.QWEN_MODEL ?? 'qwen-plus', baseUrl: options.baseUrl ?? process.env.QWEN_BASE_URL ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1', fetch: options.fetch, maxToolRounds: options.maxToolRounds, maxToolCalls: options.maxToolCalls, toolTimeoutMs: options.toolTimeoutMs, visionModel: options.visionModel ?? process.env.QWEN_VISION_MODEL ?? 'qwen3-vl-plus', asrModel: options.asrModel ?? process.env.QWEN_ASR_MODEL ?? 'qwen3-asr-flash', ttsModel: options.ttsModel ?? process.env.QWEN_TTS_MODEL ?? 'qwen3-tts-flash', ttsVoice: options.ttsVoice ?? process.env.QWEN_TTS_VOICE ?? 'Cherry' };
   config.dashscopeBaseUrl = options.dashscopeBaseUrl ?? process.env.QWEN_DASHSCOPE_BASE_URL;
   const dataDir = options.dataDir ?? process.env.QWEN_DATA_DIR ?? join(process.cwd(), '.local');

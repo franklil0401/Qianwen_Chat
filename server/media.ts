@@ -3,7 +3,7 @@ import multer from 'multer';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, unlink, readdir, stat, rename } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
-import { fork } from 'node:child_process';
+import { fork, type ForkOptions } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import type { Attachment } from '../shared/types.ts';
@@ -83,6 +83,20 @@ export function validateDocxArchive(buffer: Buffer): void {
   if (!hasDocument) throw new MediaError('文件不是有效的 DOCX 文档。');
 }
 
+/** The parser only needs its file and normal OS environment, never service credentials. */
+export function documentWorkerConfig(
+  workerPath = fileURLToPath(new URL('./document-worker.mjs', import.meta.url)),
+  runtime: { env: NodeJS.ProcessEnv; execPath: string; versions: { electron?: string } } = process,
+): { workerPath: string; options: ForkOptions } {
+  const electron = Boolean(runtime.versions.electron);
+  const env = Object.fromEntries(Object.entries(runtime.env).filter(([name]) => !/^(?:qianwen_api_key$|qwen_|electron_run_as_node$)/i.test(name)));
+  if (electron) env.ELECTRON_RUN_AS_NODE = '1';
+  return {
+    workerPath: electron ? workerPath.replace(/(^|[\\/])app\.asar(?=[\\/])/gi, '$1app.asar.unpacked') : workerPath,
+    options: { execArgv: ['--max-old-space-size=128'], windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env, ...(electron ? { execPath: runtime.execPath } : {}) },
+  };
+}
+
 export async function extractDocument(buffer: Buffer, extension: string, signal?: AbortSignal): Promise<{ text: string; extractedCharacters: number; truncated: boolean }> {
   signal?.throwIfAborted();
   if (extension === 'txt' || extension === 'md') {
@@ -97,7 +111,8 @@ export async function extractDocument(buffer: Buffer, extension: string, signal?
   if (extension === 'docx') validateDocxArchive(buffer);
   if (!['pdf', 'docx'].includes(extension)) throw new MediaError('仅支持 TXT、Markdown、PDF 和 DOCX 文档。');
   return new Promise((resolveResult, reject) => {
-    const worker = fork(fileURLToPath(new URL('./document-worker.mjs', import.meta.url)), [], { execArgv: ['--max-old-space-size=128'], windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    const launch = documentWorkerConfig();
+    const worker = fork(launch.workerPath, [], launch.options);
     let settled = false;
     const finish = (error?: Error, result?: { text: string; extractedCharacters: number; truncated: boolean }) => {
       if (settled) return; settled = true;
