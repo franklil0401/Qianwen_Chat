@@ -1,6 +1,6 @@
 {
   "name": "qianwen-chat",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "engines": {
     "node": ">=24.0.0"

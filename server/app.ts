@@ -7,14 +7,14 @@ import { z } from 'zod';
 import type { StreamEvent } from '../shared/types.ts';
 import { PublicError, runChat, type ProviderConfig } from './provider.ts';
 import { toolDefinitions } from './tools.ts';
-import { attachmentsSchema, idSchema, toolSchema } from '../shared/schemas.ts';
+import { attachmentsSchema, idSchema, searchSourceSchema, toolSchema } from '../shared/schemas.ts';
 import { validateWorkspace } from '../shared/workspace.ts';
 import { createAccountService } from './accounts.ts';
 import { createMediaService } from './media.ts';
 
 const messageSchema = z.discriminatedUnion('role', [
   z.object({ role: z.literal('user'), content: z.string().max(16_000), tools: z.array(toolSchema).max(16).optional(), attachments: attachmentsSchema.optional() }),
-  z.object({ role: z.literal('assistant'), content: z.string().max(120_000), tools: z.array(toolSchema).max(16).optional() }),
+  z.object({ role: z.literal('assistant'), content: z.string().max(120_000), tools: z.array(toolSchema).max(16).optional(), searchSources: z.array(searchSourceSchema).max(20).optional() }),
 ]);
 export const chatSchema = z.object({ runId: idSchema, conversationId: idSchema, messageId: idSchema, messages: z.array(messageSchema).min(1).max(80), useTools: z.boolean(), thinking: z.boolean(), webSearch: z.boolean().optional() }).strict().refine(value => { const last = value.messages.at(-1); return last?.role === 'user' && Boolean(last.content.trim() || last.attachments?.length); }, { message: '最后一条消息必须是用户问题或附件' });
 
@@ -33,8 +33,9 @@ export function createApp(options: AppOptions = {}) {
   const media = createMediaService({ getOwner: accounts.getOwner, config, storageDir: join(dataDir, 'uploads'), fetch: options.fetch });
   const runs = new Map<string, { owner: string; controller: AbortController }>();
   let disposed = false;
-  app.locals.dispose = () => { if (disposed) return; disposed = true; for (const run of runs.values()) run.controller.abort(); runs.clear(); accounts.close(); };
+  app.locals.dispose = () => { if (disposed) return; disposed = true; for (const run of runs.values()) run.controller.abort(); runs.clear(); media.dispose(); accounts.close(); };
   app.use('/api', (req, res, next) => {
+    if (disposed) { res.status(503).json({ error: '服务已停止，请重新启动应用。' }); return; }
     const allowed = new Set(['127.0.0.1', 'localhost', '[::1]']);
     if (publicUrl) allowed.add(publicUrl.hostname);
     if (!allowed.has(req.hostname)) { res.status(403).json({ error: '仅允许本机访问' }); return; }

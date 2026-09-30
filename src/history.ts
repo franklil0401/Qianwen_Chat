@@ -6,7 +6,8 @@ const encoder = new TextEncoder();
 /**
  * Keep a contiguous suffix of complete user turns within the transport budget.
  * The 220 KB default leaves room for the request envelope beneath the local
- * server's 256 KB body limit. Sources must already be serialized into content.
+ * server's 256 KB body limit. Local knowledge references must already be
+ * serialized into content; searchSources travel with their assistant answer.
  * Messages and tool objects are kept intact; this does not modify saved history.
  */
 export function prepareHistory(

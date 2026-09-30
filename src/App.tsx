@@ -60,7 +60,7 @@ import SearchSources from "./SearchSources";
 import SpeechButton from "./SpeechButton";
 import { useSpeechPlayback } from "./useSpeechPlayback";
 import { apiFetch, setActiveAccount } from "./api";
-import { attachmentMetadata } from "./multimodal";
+import { attachmentMetadata, sourceMetadata } from "./multimodal";
 import { searchSourceSchema } from "../shared/schemas";
 import { prepareHistory, serializeSources } from "./history";
 import ReadingPreferences from "./ReadingPreferences";
@@ -659,7 +659,8 @@ export default function App() {
             (message) =>
               message.content ||
               message.tools?.length ||
-              message.attachments?.length,
+              message.attachments?.length ||
+              message.searchSources?.length,
           )
           .map(
             ({
@@ -667,11 +668,13 @@ export default function App() {
               content: messageContent,
               tools,
               sources,
+              searchSources,
               attachments: files,
             }) => ({
               role,
               content: serializeSources(messageContent, sources),
               attachments: files?.map(attachmentMetadata),
+              searchSources: role === "assistant" ? searchSources?.map(sourceMetadata) : undefined,
               tools: tools?.map((tool) =>
                 ["receiving", "queued", "running"].includes(tool.status)
                   ? { ...tool, status: "cancelled" as const }

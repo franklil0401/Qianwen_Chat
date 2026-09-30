@@ -47,6 +47,8 @@ export interface HistoryMessage {
   content: string;
   tools?: ToolCall[];
   attachments?: Attachment[];
+  /** Sources retained with a previous assistant answer, not a fresh search. */
+  searchSources?: SearchSource[];
 }
 
 export interface ChatRequest {

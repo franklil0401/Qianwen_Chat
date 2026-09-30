@@ -17,7 +17,10 @@ export const attachmentsSchema = z.array(attachmentSchema).max(4).refine(items =
 export const searchSourceSchema = z.object({
   id: z.string().min(1).max(200),
   title: z.string().max(500),
-  url: z.string().url().max(4000).refine(value => /^https?:\/\//i.test(value), '来源必须是网页地址'),
+  url: z.string().url().max(4000).refine(value => {
+    try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password; }
+    catch { return false; }
+  }, '来源必须是不含凭据的网页地址'),
   siteName: z.string().max(300).optional(),
   snippet: z.string().max(2000).optional(),
 }).strict();

@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { readSSE } from '../shared/sse';
-import type { Attachment, ChatRequest, StreamEvent } from '../shared/types';
+import type { Attachment, ChatRequest, HistoryMessage, StreamEvent } from '../shared/types';
 import { redPng, textDocx, textPdf } from '../tests/media-fixtures';
 
 const base = process.env.LOCAL_APP_URL ?? 'http://127.0.0.1:3001';
@@ -25,8 +25,8 @@ async function upload(bytes: Uint8Array, name: string, mime: string) {
   if (!response.ok || !data.attachment) throw new Error(data.error ?? `上传 HTTP ${response.status}`);
   return data.attachment;
 }
-async function chat(prompt: string, attachments: Attachment[] = [], webSearch = false, useTools = false) {
-  const body: ChatRequest = { runId: crypto.randomUUID(), conversationId: crypto.randomUUID(), messageId: crypto.randomUUID(), messages: [{ role: 'user', content: prompt, attachments }], thinking: false, useTools, webSearch };
+async function chat(prompt: string, attachments: Attachment[] = [], webSearch = false, useTools = false, previous: HistoryMessage[] = []) {
+  const body: ChatRequest = { runId: crypto.randomUUID(), conversationId: crypto.randomUUID(), messageId: crypto.randomUUID(), messages: [...previous, { role: 'user', content: prompt, attachments }], thinking: false, useTools, webSearch };
   const response = await request('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!response.ok || !response.body) throw new Error(`对话 HTTP ${response.status}`);
   const events: StreamEvent[] = [];
@@ -53,12 +53,24 @@ await check('TXT / PDF / DOCX解析后参与模型回答', async () => {
   for (const token of ['TXT_TOKEN_8624', 'PDF_TEST_SECRET_7421', 'DOCX_TEST_SECRET_9357']) if (!text.includes(token)) throw new Error(`回复未包含文件真实正文的 ${token}`);
   return '三个文件的正文均被实际解析，模型正确读出各自验证代码';
 });
+let previousSearch: HistoryMessage[] = [];
+let firstSourceUrl = '';
 await check('联网来源与计算工具同轮闭环', async () => {
-  const { events } = await chat('联网查询杭州今天的天气，然后必须使用 calculate 工具计算 13*17，最后简短汇总。', [], true, true);
+  const prompt = '联网查询杭州今天的天气，然后必须使用 calculate 工具计算 13*17，最后简短汇总。';
+  const { events, text } = await chat(prompt, [], true, true);
   const sources = events.filter(event => event.type === 'sources').at(-1)?.sources ?? [];
   if (!sources.length || sources.some(source => !/^https?:\/\//.test(source.url))) throw new Error('没有真实网页来源');
   if (!events.some(event => event.type === 'tool-update' && event.tool.status === 'success' && event.tool.result?.type === 'calculator' && event.tool.result.value === 221)) throw new Error('计算工具未成功得到221');
+  previousSearch = [{ role: 'user', content: prompt }, { role: 'assistant', content: text, searchSources: sources }];
+  firstSourceUrl = sources[0].url;
   return `返回 ${sources.length} 个真实来源，计算工具返回 221，模型完成回答`;
+});
+await check('关闭联网后追问上一轮来源', async () => {
+  if (!firstSourceUrl) throw new Error('上一轮未获得可用来源');
+  const { text, events } = await chat('上一条回答的来源列表第 1 条的完整 URL 是什么？不要重新搜索，原样输出 URL。', [], false, false, previousSearch);
+  if (!text.includes(firstSourceUrl)) throw new Error('回复未包含上一轮第一个来源的原始 URL');
+  if (events.some(event => event.type === 'sources')) throw new Error('历史来源被错误标记为新检索');
+  return '模型从会话元数据准确返回原始来源 URL，没有新搜索事件';
 });
 await check('真实语音合成与语音识别', async () => {
   const speech = await request('/api/audio/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: '你好，这是语音识别测试。' }) });

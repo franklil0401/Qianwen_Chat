@@ -147,6 +147,18 @@ export function createMediaService(options: MediaServiceOptions) {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MEDIA_LIMITS.documentBytes, files: 1, fields: 0 } });
   const audioUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MEDIA_LIMITS.audioBytes, files: 1, fields: 0 } });
   const pendingWrites = new Map<string, Promise<void>>();
+  const activeRequests = new Set<AbortController>();
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    for (const controller of activeRequests) controller.abort(new DOMException('服务已停止', 'AbortError'));
+    activeRequests.clear();
+  };
+  router.use((_req, res, next) => {
+    if (disposed) { res.status(503).json({ error: '服务已停止，请重新启动应用。' }); return; }
+    next();
+  });
   async function withOwnerWrite<T>(owner: string, action: () => Promise<T>): Promise<T> {
     const previous = pendingWrites.get(owner) ?? Promise.resolve();
     let release!: () => void;
@@ -182,14 +194,17 @@ export function createMediaService(options: MediaServiceOptions) {
     return results;
   }
   const wrap = (action: (req: Request, res: Response, signal: AbortSignal) => Promise<void>) => async (req: Request, res: Response) => {
+    // Multipart parsing runs before this handler and may finish during shutdown.
+    if (disposed) { res.status(503).json({ error: '服务已停止，请重新启动应用。' }); return; }
     const controller = new AbortController();
+    activeRequests.add(controller);
     const timeout = setTimeout(() => controller.abort(new DOMException('请求超时', 'TimeoutError')), 90_000);
     const close = () => { if (!res.writableEnded) controller.abort(new DOMException('已取消', 'AbortError')); };
     res.on('close', close);
     try { await action(req, res, controller.signal); }
     catch (error) {
-      if (!res.destroyed && !res.headersSent) res.status(controller.signal.reason?.name === 'TimeoutError' ? 504 : error instanceof MediaError ? error.status : 500).json({ error: controller.signal.reason?.name === 'TimeoutError' ? '媒体处理超时，请重试。' : error instanceof MediaError ? error.message : '媒体处理失败，请检查文件或网络后重试。' });
-    } finally { clearTimeout(timeout); res.off('close', close); }
+      if (!res.destroyed && !res.headersSent) res.status(disposed ? 503 : controller.signal.reason?.name === 'TimeoutError' ? 504 : error instanceof MediaError ? error.status : 500).json({ error: disposed ? '服务已停止，请重新启动应用。' : controller.signal.reason?.name === 'TimeoutError' ? '媒体处理超时，请重试。' : error instanceof MediaError ? error.message : '媒体处理失败，请检查文件或网络后重试。' });
+    } finally { activeRequests.delete(controller); clearTimeout(timeout); res.off('close', close); }
   };
   const requireKey = () => { if (!apiKey) throw new MediaError('未配置 Qianwen_api_key，无法使用语音服务。', 503); };
   const checkUpstream = async (response: globalThis.Response) => {
@@ -263,5 +278,5 @@ export function createMediaService(options: MediaServiceOptions) {
     next(error);
   };
   router.use(mediaErrors);
-  return { router, resolveAttachments, models: { asrModel, ttsModel }, limits: MEDIA_LIMITS };
+  return { router, resolveAttachments, dispose, models: { asrModel, ttsModel }, limits: MEDIA_LIMITS };
 }
