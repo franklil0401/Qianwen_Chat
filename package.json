@@ -1,8 +1,10 @@
 {
   "name": "qianwen-chat",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
-  "engines": { "node": ">=24.0.0" },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n server,web \"tsx watch server/index.ts\" \"vite --host 127.0.0.1\"",

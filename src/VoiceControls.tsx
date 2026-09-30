@@ -18,6 +18,7 @@ export default function VoiceControls({
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
+  const [recognizedText, setRecognizedText] = useState("");
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const recording = useRef<Blob | null>(null);
@@ -54,6 +55,7 @@ export default function VoiceControls({
     dispose();
     setPhase("idle");
     setPreviewUrl("");
+    setRecognizedText("");
     setError("");
     setSeconds(0);
   }
@@ -78,6 +80,7 @@ export default function VoiceControls({
     dispose();
     setError("");
     setPreviewUrl("");
+    setRecognizedText("");
     setPhase("permission");
     setSeconds(0);
     const current = version.current;
@@ -157,6 +160,19 @@ export default function VoiceControls({
   }
   async function transcribe() {
     if (disabled || !recording.current || phase === "transcribing") return;
+    if (recognizedText) {
+      try {
+        latest.current.onTranscript(recognizedText);
+        cancel();
+      } catch (cause) {
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "无法填入文字，请检查输入内容。",
+        );
+      }
+      return;
+    }
     const current = version.current;
     const controller = new AbortController();
     request.current = controller;
@@ -191,7 +207,11 @@ export default function VoiceControls({
       if (typeof result.text !== "string" || !result.text.trim())
         throw new Error("没有识别到文字，可以重新录制或重试。");
       if (current !== version.current || controller.signal.aborted) return;
-      latest.current.onTranscript(result.text.trim());
+      const text = result.text.trim();
+      // Recognition already succeeded. If the composer rejects the text (for
+      // example because it is full), retain it for a local insertion retry.
+      setRecognizedText(text);
+      latest.current.onTranscript(text);
       cancel();
     } catch (cause) {
       if (current !== version.current) return;
@@ -251,7 +271,7 @@ export default function VoiceControls({
               <audio controls src={previewUrl} aria-label="录音预览" />
               <button
                 type="button"
-                aria-label="转成文字"
+                aria-label={recognizedText ? "填入已识别文字" : "转成文字"}
                 disabled={disabled || phase === "transcribing"}
                 onClick={() => void transcribe()}
               >
@@ -260,7 +280,11 @@ export default function VoiceControls({
                 ) : (
                   <Check size={14} />
                 )}
-                {phase === "transcribing" ? "正在转写" : "转成文字"}
+                {phase === "transcribing"
+                  ? "正在转写"
+                  : recognizedText
+                    ? "填入文字"
+                    : "转成文字"}
               </button>
             </>
           )}
@@ -268,6 +292,15 @@ export default function VoiceControls({
             <X size={14} />
           </button>
         </div>
+      )}
+      {recognizedText && (
+        <details
+          className="voice-transcript"
+          data-testid="recognized-transcript"
+        >
+          <summary>已识别文字 · 缩短草稿后可直接填入</summary>
+          <p>{recognizedText}</p>
+        </details>
       )}
       {error && (
         <p className="voice-error" role="alert">

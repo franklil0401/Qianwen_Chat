@@ -365,3 +365,20 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+.voice-transcript {
+  flex-basis: 100%;
+  max-width: 100%;
+  color: var(--reading-text, #353340);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.voice-transcript summary {
+  cursor: pointer;
+}
+.voice-transcript p {
+  margin: 6px 0;
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

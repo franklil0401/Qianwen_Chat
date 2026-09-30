@@ -219,6 +219,11 @@ export default function App() {
   const composerScopeRef = useRef(composerScope);
   composerScopeRef.current = composerScope;
   useLayoutEffect(() => {
+    // A removed textarea may never emit compositionend. Its IME session must
+    // not disable Enter or keyboard shortcuts in the replacement composer.
+    composing.current = false;
+  }, [composerScope]);
+  useLayoutEffect(() => {
     if (focusComposerAfterRender.current && textarea.current) {
       focusComposerAfterRender.current = false;
       textarea.current.focus();
