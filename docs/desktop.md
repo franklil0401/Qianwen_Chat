@@ -4,10 +4,10 @@ QianwenChat v0.13.0 面向 Windows x64。安装包内置 Electron 和 Node.js，
 
 ## 安装与配置
 
-本地交付文件位于项目的 `release/` 目录：
+安装包于 2026-10-01 补发布至 [v0.13.0 Release](https://github.com/franklil0401/Qianwen_Chat/releases/tag/v0.13.0)。可直接下载以下文件，本地交付文件也保留在项目的 `release/` 目录：
 
-- `release/QianwenChat-Setup-0.13.0-x64.exe`：安装程序。
-- `release/QianwenChat-Setup-0.13.0-x64.exe.sha256`：安装文件的 SHA-256 校验值。
+- [Windows x64 安装程序](https://github.com/franklil0401/Qianwen_Chat/releases/download/v0.13.0/QianwenChat-Setup-0.13.0-x64.exe)：本地路径 `release/QianwenChat-Setup-0.13.0-x64.exe`。
+- [SHA-256 校验文件](https://github.com/franklil0401/Qianwen_Chat/releases/download/v0.13.0/QianwenChat-Setup-0.13.0-x64.exe.sha256)：本地路径 `release/QianwenChat-Setup-0.13.0-x64.exe.sha256`。
 
 本版安装包**未做代码签名**，Windows 可能显示未知发布者提示。请核对文件来源和校验值；校验值用于核对文件一致性，不代表发布者签名。在项目根目录打开 PowerShell，可查看并比对：
 

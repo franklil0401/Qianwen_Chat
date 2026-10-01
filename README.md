@@ -6,7 +6,9 @@
 
 ## Windows 安装包
 
-双击项目 `release/QianwenChat-Setup-0.13.0-x64.exe` 安装，从桌面“千问桌面助手”启动。安装包内置运行时，无需安装 Node.js；模型仍读取 Windows 环境变量 `Qianwen_api_key`。本版未做代码签名。
+从 [v0.13.0 Release](https://github.com/franklil0401/Qianwen_Chat/releases/tag/v0.13.0) 下载 [Windows x64 安装包](https://github.com/franklil0401/Qianwen_Chat/releases/download/v0.13.0/QianwenChat-Setup-0.13.0-x64.exe) 和 [SHA-256 校验文件](https://github.com/franklil0401/Qianwen_Chat/releases/download/v0.13.0/QianwenChat-Setup-0.13.0-x64.exe.sha256)。下载资产于 2026-10-01 补发布。
+
+双击下载的安装包（本地交付路径为 `release/QianwenChat-Setup-0.13.0-x64.exe`）安装，从桌面“千问桌面助手”启动。安装包内置运行时，无需安装 Node.js；模型仍读取 Windows 环境变量 `Qianwen_api_key`。本版未做代码签名。
 
 安装、配置、数据备份与复现命令见 [桌面版说明](docs/desktop.md)。桌面版和网页的数据独立，迁移会话可用 JSON 备份，原附件需重新上传。
 

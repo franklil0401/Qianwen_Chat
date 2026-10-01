@@ -167,7 +167,9 @@
 
 安装后真实 API 六项检查通过：图片识别红色，PDF/DOCX 中独有验证码准确回答；回复合成音频进入播放状态并能停止；计算器结果 221 与打包知识库检索同轮完成；渲染 10 条真实联网来源；111404 字节合成 WAV 成功转写；生成长文中途停止。页面没有未捕获异常。另独立验证同一数据空间重复启动只保留一个实例、输入后立即退出重启保留最新草稿、外部程序占用 18439 时明确退出并记录 EADDRINUSE，不抢占其他程序。
 
-安装程序实际运行退出码为 0，文件 SHA-256 为 `37ca38043b672d3ac07fd402a8c4fca5db523e81bfcc7f44cc870433605f0d3c`。交付文件为 `release/QianwenChat-Setup-0.13.0-x64.exe` 及同名 `.sha256`，安装包约 126.7 MiB；当前未签名，不自动更新或发布下载资产。源码、说明和截图提交 Git，二进制留在本地交付目录。可复现命令见 [桌面说明](desktop.md)。
+安装程序实际运行退出码为 0，文件 SHA-256 为 `37ca38043b672d3ac07fd402a8c4fca5db523e81bfcc7f44cc870433605f0d3c`。交付文件为 `release/QianwenChat-Setup-0.13.0-x64.exe` 及同名 `.sha256`，安装包约 126.7 MiB；当前未签名，不自动更新。源码、说明和截图提交 Git，二进制保留在本地交付目录。可复现命令见 [桌面说明](desktop.md)。
+
+2026-10-01 补发布：将同一安装包及校验文件上传至 [v0.13.0 Release](https://github.com/franklil0401/Qianwen_Chat/releases/tag/v0.13.0)，提供 [Windows x64 安装包](https://github.com/franklil0401/Qianwen_Chat/releases/download/v0.13.0/QianwenChat-Setup-0.13.0-x64.exe) 与 [SHA-256 校验文件](https://github.com/franklil0401/Qianwen_Chat/releases/download/v0.13.0/QianwenChat-Setup-0.13.0-x64.exe.sha256) 下载。版本和安装包内容不变，发布标签对应源码提交 `63ac58d`；上传前重新计算的 SHA-256 与上述校验值一致。
 
 截图来自实际安装程序保留的真实模型对话：[图片与文档](screenshots/desktop-multimodal.png)、[工具与本地资料](screenshots/desktop-tools.png)、[联网来源](screenshots/desktop-web-search.png)。
 
